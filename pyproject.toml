@@ -1,0 +1,18 @@
+[project]
+name = "chem-pred-transformer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "einops>=0.8.1",
+    "joblib>=1.4.2",
+    "lightning>=2.5.0.post0",
+    "rdkit>=2024.9.6",
+    "tensorboard>=2.19.0",
+    "tensorboardx>=2.6.2.2",
+    "torch>=2.6.0",
+    "torchmetrics>=1.6.3",
+    "transformers>=4.49.0",
+    "xformers>=0.0.29.post3",
+]

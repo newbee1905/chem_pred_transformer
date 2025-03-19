@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Lightning Logs
+lightning_logs/
+trained_tokenizer.bk/
+
+# Dataset
+USPTO*.csv
+chembl_35.smi
+
+# Models
+*.pth
+**/*.ckpt
