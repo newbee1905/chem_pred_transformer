@@ -1,4 +1,5 @@
-from trainer import BARTModel
+from trainer.bart import BARTModel
+# from trainer.vae import BARTVAEModel
 from models.bart import BART
 from models.utils import DyT
 from dataset import ChemBL35Dataset
