@@ -1,3 +1,4 @@
+import torch
 import torchmetrics
 
 class SMILESEvaluationMetric(torchmetrics.Metric):
