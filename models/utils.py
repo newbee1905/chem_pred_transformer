@@ -6,6 +6,8 @@ from einops import rearrange, repeat
 
 from typing import Tuple
 
+# TODO: recheck the paper again cause currently
+# it is slower in training compare to RMSNorm
 class DyT(nn.Module):
 	def __init__(self, C, init_alpha=0.5):
 		super().__init__()
@@ -19,28 +21,59 @@ class DyT(nn.Module):
 		return self.gamma * x + self.beta
 
 class FeedForward(nn.Module):
-	def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1):
+	"""Feedforward block with configurable activation.
+
+	Supports:
+	- 'swiglu': uses SiLU on the first half and multiplies with the second half.
+	- 'geglu': uses GELU on the first half and multiplies with the second half.
+	- 'gelu': standard feedforward with GELU.
+	- 'silu': standard feedforward with SiLU.
+	"""
+	def __init__(
+			self,
+			d_model: int,
+			d_ff: int,
+			dropout: float = 0.1,
+			activation: str = "SwiGLU",
+		):
 		super().__init__()
 
-		# default scaling down by 2/3 since normal 
-		# d_ff is 4xd_model
-		# Should be ~2.667 scalling now
-		# based on Llama SwiGLU FeedForward
-		# https://github.com/meta-llama/llama
-		d_ff = int(2 * d_ff // 3)
+		self.activation = activation.lower()
+		if self.activation not in ('swiglu', 'silu', 'geglu', 'gelu'):
+			raise ValueError(f"Unknown activation type: {activation}")
+
+		self.uses_gate = self.activation in ('swiglu', 'geglu')
+		self.act_fn = F.silu if self.activation in ('swiglu', 'silu') else F.gelu
 
 		# TODO: checking out parallel Linear from llama
-		self.fc_in = nn.Linear(d_model, d_ff * 2) # can be column parallel
+		# fc_in can be column parallel
+		# fc_out can be row parallel
+
+		if self.activation in ('swiglu', 'geglu'):
+			# default scaling down by 2/3 since normal 
+			# d_ff is 4xd_model
+			# Should be ~2.667 scalling now
+			# based on Llama SwiGLU FeedForward
+			# https://github.com/meta-llama/llama
+			d_ff = int(2 * d_ff // 3)
+			self.fc_in = nn.Linear(d_model, d_ff * 2)
+		else:
+			self.fc_in = nn.Linear(d_model, d_ff)
+
 		self.fc_out = nn.Linear(d_ff, d_model) # can be row parallel
 
 		self.dropout = nn.Dropout(dropout)
 
 	def forward(self, x: torch.Tensor) -> torch.Tensor:
 		x_proj = self.fc_in(x)
-		gate, x_proj = x_proj.chunk(2, dim=-1)
 
-		x = x_proj * F.silu(gate)
-		x = self.fc_out(self.dropout(x))
+		if self.activation in ('swiglu', 'geglu'):
+			gate, x_proj = x_proj.chunk(2, dim=-1)
+			x_proj = gate * self.act_fn(value)
+		else:
+			x_proj = self.act_fn(x_proj)
+
+		x = self.fc_out(self.dropout(x_proj))
 
 		return x
 
