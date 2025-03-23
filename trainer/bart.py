@@ -19,11 +19,12 @@ from einops import rearrange, repeat
 from typing import Optional
 
 from models.bart import BART
-from tokenizer import SMILESTokenizer
+from tokenisers.neocart import SMILESTokenizer
+from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
 
 class BARTModel(pl.LightningModule):
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer, max_length: int = 256):
+	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
@@ -41,12 +42,12 @@ class BARTModel(pl.LightningModule):
 		self.generate_times = []
 
 	def forward(self, src, tgt, src_mask, tgt_mask):
-		return self.model(src, tgt, src_mask, tgt_mask)
+		return self.model(src, tgt)
 
 	def training_step(self, batch, batch_idx):
 		src, tgt = batch["input_ids"], batch["labels"]
 		mask = batch["attention_mask"].to(torch.float)
-		attn_mask = mask.to(dtype=torch.float) # Convert to float
+		attn_mask = mask.to(dtype=torch.float)
 		attn_mask = mask.masked_fill(mask == 0, float('-inf'))
 		attn_mask = mask.masked_fill(mask == 1, float(0.0))
 

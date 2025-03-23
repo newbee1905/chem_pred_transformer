@@ -5,9 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "deepspeed>=0.16.4",
     "einops>=0.8.1",
     "joblib>=1.4.2",
     "lightning>=2.5.0.post0",
+    "pysmilesutils",
     "rdkit>=2024.9.6",
     "tensorboard>=2.19.0",
     "tensorboardx>=2.6.2.2",
@@ -16,3 +18,6 @@ dependencies = [
     "transformers>=4.49.0",
     "xformers>=0.0.29.post3",
 ]
+
+[tool.uv.sources]
+pysmilesutils = { git = "https://github.com/MolecularAI/pysmilesutils" }

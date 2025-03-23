@@ -19,6 +19,7 @@ class MultiHeadAttention(nn.Module):
 		self.n_heads = n_heads
 		self.d_k = d_model // n_heads
 		
+		# TODO: optimise with qkv_proj instead of 3 separate linear
 		self.q_proj = nn.Linear(d_model, d_model)
 		self.k_proj = nn.Linear(d_model, d_model)
 		self.v_proj = nn.Linear(d_model, d_model)
@@ -82,7 +83,7 @@ class EncoderLayer(nn.Module):
 	def __init__(
 		self, d_model: int, n_heads: int, d_ff: int = 3072,
 		dropout: float = 0.2, max_seq_len: int = 1024, use_layerscale: bool = True,
-		norm_layer=nn.LayerNorm,
+		norm_layer=nn.LayerNorm, activation="swiglu",
 	):
 		super().__init__()
 		self.self_attn = MultiHeadAttention(d_model, n_heads, dropout)
@@ -91,7 +92,7 @@ class EncoderLayer(nn.Module):
 		self.attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 
 		self.ff_norm = norm_layer(d_model)
-		self.ff = FeedForward(d_model, d_ff, dropout)
+		self.ff = FeedForward(d_model, d_ff, dropout, activation)
 		self.ff_dropout = nn.Dropout(dropout)
 		self.ff_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 			
@@ -118,7 +119,7 @@ class DecoderLayer(nn.Module):
 	def __init__(
 		self, d_model: int, n_heads: int, d_ff: int = 3072,
 		dropout: float = 0.2, max_seq_len: int = 1024, use_layerscale: bool = True,
-		norm_layer=nn.LayerNorm,
+		norm_layer=nn.LayerNorm, activation="swiglu",
 	):
 		super().__init__()
 
@@ -133,7 +134,7 @@ class DecoderLayer(nn.Module):
 		self.cross_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 
 		self.ff_norm = norm_layer(d_model)
-		self.ff = FeedForward(d_model, d_ff, dropout)
+		self.ff = FeedForward(d_model, d_ff, dropout, activation)
 		self.ff_dropout = nn.Dropout(dropout)
 		self.ff_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 
@@ -168,3 +169,52 @@ class DecoderLayer(nn.Module):
 			tgt = tgt + ff_out
 
 		return tgt
+
+class PreNormEncoderLayer(nn.TransformerEncoderLayer):
+	def forward(self, src, src_mask=None, src_key_padding_mask=None):
+		att = self.norm1(src)
+		att = self.self_attn(att, att, att, attn_mask=src_mask, key_padding_mask=src_key_padding_mask)[0]
+		att = src + self.dropout1(att)
+
+		out = self.norm2(att)
+		out = self.linear2(self.dropout(self.activation(self.linear1(out))))
+		out = att + self.dropout2(out)
+		return out
+
+
+class PreNormDecoderLayer(nn.TransformerDecoderLayer):
+	def forward(
+		self,
+		tgt,
+		memory,
+		tgt_mask=None,
+		memory_mask=None,
+		tgt_key_padding_mask=None,
+		memory_key_padding_mask=None,
+	):
+		query = self.norm1(tgt)
+		query = self.self_attn(
+			query,
+			query,
+			query,
+			attn_mask=tgt_mask,
+			key_padding_mask=tgt_key_padding_mask,
+		)[0]
+		query = tgt + self.dropout1(query)
+
+		# Context attention block
+		att = self.norm2(query)
+		att = self.multihead_attn(
+			att,
+			memory,
+			memory,
+			attn_mask=memory_mask,
+			key_padding_mask=memory_key_padding_mask,
+		)[0]
+		att = query + self.dropout2(att)
+
+		out = self.norm3(att)
+		out = self.linear2(self.dropout(self.activation(self.linear1(out))))
+		out = att + self.dropout3(out)
+
+		return out

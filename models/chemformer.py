@@ -10,16 +10,16 @@ from einops import rearrange, repeat
 from typing import Optional
 
 from models.utils import DyT, precompute_freqs_cis
-from models.transformer import EncoderLayer, DecoderLayer
+from models.transformer import PreNormEncoderLayer, PreNormDecoderLayer
 
-class BART(nn.Module):
+class Chemformer(nn.Module):
 	def __init__(
 		self, vocab_size: int,
 		d_model: int = 512, n_heads: int = 8, n_layers: int = 6,
 		d_ff: int = 3072, max_seq_len: int = 256,
 		dropout: float = 0.1,
 		norm_layer=nn.LayerNorm,
-		activation: str = "swiglu",
+		activation: str = "gelu",
 	):
 		super().__init__()
 
@@ -30,15 +30,17 @@ class BART(nn.Module):
 
 		self.freqs_cis = precompute_freqs_cis(d_model // n_heads, max_seq_len * 2)
 
-		self.enc_layers = nn.ModuleList([
-			EncoderLayer(d_model, n_heads, d_ff, dropout, max_seq_len, norm_layer=norm_layer, activation=activation)
-			for _ in range(n_layers)
-		])
+		self.encoder = nn.TransformerEncoder(
+			PreNormEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation),
+			n_layers,
+			norm=nn.LayerNorm(d_model),
+		)
 
-		self.dec_layers = nn.ModuleList([
-			DecoderLayer(d_model, n_heads, d_ff, dropout, max_seq_len, norm_layer=norm_layer, activation=activation)
-			for _ in range(n_layers)
-		])
+		self.decoder = nn.TransformerDecoder(
+			PreNormDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation),
+			n_layers,
+			norm=nn.LayerNorm(d_model),
+		)
 
 		self.fc_out = nn.Linear(d_model, vocab_size)
 		self.dropout = nn.Dropout(dropout)
