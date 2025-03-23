@@ -60,7 +60,7 @@ class BARTModel(pl.LightningModule):
 			logits[:, 1:, :].contiguous().view(-1, logits.size(-1)),
 			target.contiguous().view(-1)
 		)
-		self.log("train_loss", loss, prog_bar=True)
+		self.log("train_loss", loss, prog_bar=True, sync_dist=True)
 		return loss
 
 	def validation_step(self, batch, batch_idx):
@@ -90,7 +90,7 @@ class BARTModel(pl.LightningModule):
 
 		self.val_top1_acc.append(top1_acc)
 		self.val_top5_acc.append(top5_acc)
-		self.log("val_loss", loss, prog_bar=True)
+		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
 
 		if self.current_epoch % 5 == 4:
 			start_time = time.time()
@@ -127,12 +127,12 @@ class BARTModel(pl.LightningModule):
 				"val_valid_smiles_ratio": scores["valid_smiles_ratio"],
 				"val_avg_tanimoto": scores["avg_tanimoto"],
 				"val_gen_ct": avg_gen_ct,
-			}, prog_bar=True)
+			}, prog_bar=True, sync_dist=True)
 		else:
 			self.log_dict({
 				"val_top1_acc": avg_top1,
 				"val_top5_acc": avg_top5,
-			}, prog_bar=True)
+			}, prog_bar=True, sync_dist=True)
 
 		self.val_top1_acc.clear()
 		self.val_top5_acc.clear()
@@ -167,7 +167,7 @@ class BARTModel(pl.LightningModule):
 
 		self.test_top1_acc.append(top1_acc)
 		self.test_top5_acc.append(top5_acc)
-		self.log("test_loss", loss, prog_bar=True)
+		self.log("test_loss", loss, prog_bar=True, sync_dist=True)
 
 		start_time = time.time()
 		generated_tokens = self.model.generate(
@@ -201,7 +201,7 @@ class BARTModel(pl.LightningModule):
 			"test_valid_smiles_ratio": scores["valid_smiles_ratio"],
 			"test_avg_tanimoto": scores["avg_tanimoto"],
 			"test_gen_ct": avg_gen_ct,
-		}, prog_bar=True)
+		}, prog_bar=True, sync_dist=True)
 
 		self.test_top1_acc.clear()
 		self.test_top5_acc.clear()
