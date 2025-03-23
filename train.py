@@ -49,32 +49,32 @@ if __name__ == "__main__":
 	)
 	# model.load_state_dict(torch.load("_pretrained_model.pt", weights_only=True))
 	print(model)
-	# module = BARTModel(model, tokenizer)
-	#
-	# early_stop_callback = EarlyStopping(
-	# 	monitor="val_loss",
-	# 	patience=10,
-	# 	verbose=True,
-	# 	mode="min"
-	# )
-	#
-	# checkpoint_callback = ModelCheckpoint(
-	# 	monitor="val_loss",
-	# 	dirpath="train_checkpoints",
-	# 	filename="best-checkpoint",
-	# 	save_top_k=2,
-	# 	mode="min"
-	# )
-	#
-	# trainer = pl.Trainer(
-	# 	max_epochs=20,	
-	# 	callbacks=[early_stop_callback, checkpoint_callback],
-	# 	logger=logger,
-	# 	limit_train_batches=0.001,
-	# 	limit_val_batches=0.001,
-	# 	limit_test_batches=0.0001,
-	# )
-	#
-	# # trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
-	# trainer.fit(module, train_dl, val_dl)
-	# torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")
+	module = BARTModel(model, tokenizer)
+
+	early_stop_callback = EarlyStopping(
+		monitor="val_loss",
+		patience=10,
+		verbose=True,
+		mode="min"
+	)
+
+	checkpoint_callback = ModelCheckpoint(
+		monitor="val_loss",
+		dirpath="train_checkpoints",
+		filename="best-checkpoint",
+		save_top_k=2,
+		mode="min"
+	)
+
+	trainer = pl.Trainer(
+		max_epochs=20,	
+		callbacks=[early_stop_callback, checkpoint_callback],
+		logger=logger,
+		limit_train_batches=0.001,
+		limit_val_batches=0.001,
+		limit_test_batches=0.0001,
+	)
+
+	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
+	trainer.fit(module, train_dl, val_dl)
+	torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")

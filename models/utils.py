@@ -69,7 +69,7 @@ class FeedForward(nn.Module):
 
 		if self.activation in ('swiglu', 'geglu'):
 			gate, x_proj = x_proj.chunk(2, dim=-1)
-			x_proj = gate * self.act_fn(value)
+			x_proj = gate * self.act_fn(x_proj)
 		else:
 			x_proj = self.act_fn(x_proj)
 
