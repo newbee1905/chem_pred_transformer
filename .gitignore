@@ -19,6 +19,9 @@ chembl_35.smi
 
 # Models
 *.pth
+*.pt
+*.ckpt
 **/*.ckpt
 
 data/*
+
