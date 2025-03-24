@@ -16,6 +16,7 @@ if __name__ == "__main__":
 			e = torch.cat([e, pad_tensor])
 		enc[i] = e
 	
+	print(tokeniser.vocabulary[tokeniser.special_tokens["start"]])
 	print(enc)
 
 	dec = tokeniser.decode(enc)

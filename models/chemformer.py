@@ -94,9 +94,9 @@ class Chemformer(nn.Module):
 	def generate(
 		self,
 		src: torch.Tensor,
-		max_length: int = 256,
-		bos_token_id: int = 0,
-		eos_token_id = 1,
+		max_length: int = 512,
+		bos_token_id: int = 2,
+		eos_token_id = 3,
 		src_mask: Optional[torch.Tensor] = None,
 		top_k: int = 0,
 	) -> torch.Tensor:

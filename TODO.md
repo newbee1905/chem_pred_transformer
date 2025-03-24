@@ -1,0 +1,2 @@
+- [ ] Setup ZINC dataset
+- [ ] Update the generate algorithm to make it more similar to chemformer
