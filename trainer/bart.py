@@ -24,7 +24,7 @@ from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
 
 class BARTModel(pl.LightningModule):
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256):
+	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256, mode: str = "pretrain"):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
@@ -40,6 +40,8 @@ class BARTModel(pl.LightningModule):
 		self.max_length = max_length
 
 		self.generate_times = []
+
+		self.mode = "pretrain"
 
 	def forward(self, src, tgt, src_mask, tgt_mask):
 		return self.model(src, tgt)
@@ -214,4 +216,12 @@ class BARTModel(pl.LightningModule):
 		self.smiles_metric.reset()
 
 	def configure_optimizers(self):
-		return torch.optim.AdamW(self.parameters(), lr=5e-5)
+		if self.mode == "pretrain":
+			optimizer = torch.optim.AdamW(self.parameters(), lr=1.0)
+			d_model = 512
+			warmup_steps = 8000
+			lr_lambda = lambda step: (d_model ** -0.5) * min((step + 1) ** (-0.5), (step + 1) * (warmup_steps ** -1.5))
+			scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+		else:
+			return torch.optim.AdamW(self.parameters(), lr=5e-5)

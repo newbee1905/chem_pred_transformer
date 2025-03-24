@@ -54,8 +54,9 @@ if __name__ == "__main__":
 
 	early_stop_callback = EarlyStopping(
 		monitor="val_loss",
-		patience=10,
+		patience=5,
 		verbose=True,
+		min_delta=0.001,
 		mode="min"
 	)
 
@@ -68,12 +69,15 @@ if __name__ == "__main__":
 	)
 
 	trainer = pl.Trainer(
-		max_epochs=20,	
+		max_epochs=1000,	
+		val_check_interval=500,
 		callbacks=[early_stop_callback, checkpoint_callback],
 		logger=logger,
-		limit_train_batches=0.001,
-		limit_val_batches=0.001,
-		limit_test_batches=0.0001,
+		precision=16,
+		gradient_clip_val=1.0,
+		# limit_test_batches=0.0001,
+		limit_train_batches=0.1,
+		limit_val_batches=0.1,
 	)
 
 	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
