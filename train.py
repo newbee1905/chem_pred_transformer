@@ -4,6 +4,7 @@ from models.bart import BART
 from models.chemformer import Chemformer
 from models.utils import DyT
 from dataset.chembl import ChemBL35Dataset
+from dataset.zinc import ZincDataset, load_smiles_by_set
 from tokenisers.neocart import SMILESTokenizer
 
 import torch
@@ -11,7 +12,7 @@ from torch.utils.data import DataLoader, random_split
 import torch.nn as nn
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
 if __name__ == "__main__":
 	import torch.multiprocessing as mp
@@ -20,7 +21,8 @@ if __name__ == "__main__":
 	from rdkit import RDLogger
 	RDLogger.DisableLog('rdApp.*')
 
-	smiles_file = "chembl_35.smi"
+	# smiles_file = "chembl_35.smi"
+	zinc_folder = "data/zinc"
 	tokenizer_dir = "trained_tokenizer"
 
 	tokenizer = SMILESTokenizer.from_pretrained(tokenizer_dir)
@@ -29,15 +31,24 @@ if __name__ == "__main__":
 
 	vocab_size = tokenizer.vocab_size
 
-	ds = ChemBL35Dataset(smiles_file, tokenizer, max_length=256, noise_prob=0.5)
-	train_size = int(0.9 * len(ds))
-	val_size = len(ds) - train_size
-	train_ds, val_ds = random_split(ds, [train_size, val_size])
+	# ds = ChemBL35Dataset(smiles_file, tokenizer, max_length=256, noise_prob=0.5)
+	# train_size = int(0.9 * len(ds))
+	# val_size = len(ds) - train_size
+	# train_ds, val_ds = random_split(ds, [train_size, val_size])
+
+	data_splits = load_smiles_by_set(zinc_folder)
+	print(len(data_splits["train"]["smiles"]))
+	print(len(data_splits["val"]["smiles"]))
+
+	train_ds = ZincDataset(data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer)
+	val_ds = ZincDataset(data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer)
+	test_ds = ZincDataset(data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer)
 
 	train_dl = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=10)
 	val_dl = DataLoader(val_ds, batch_size=2, shuffle=False, num_workers=10)
 
-	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_chembl35")
+	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_zinc")
+	csv_logger = CSVLogger("logs", name="pretrain_random_smiles_zinc")
 
 	model = BART(
 		vocab_size=vocab_size,
@@ -72,11 +83,10 @@ if __name__ == "__main__":
 		max_epochs=1000,	
 		val_check_interval=500,
 		callbacks=[early_stop_callback, checkpoint_callback],
-		logger=logger,
-		precision=16,
+		logger=[csv_logger, logger],
 		gradient_clip_val=1.0,
 		# limit_test_batches=0.0001,
-		limit_train_batches=0.1,
+		limit_train_batches=0.045,
 		limit_val_batches=0.1,
 	)
 
