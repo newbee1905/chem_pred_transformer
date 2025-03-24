@@ -171,9 +171,9 @@ class DecoderLayer(nn.Module):
 		return tgt
 
 class PreNormEncoderLayer(nn.TransformerEncoderLayer):
-	def forward(self, src, src_mask=None, src_key_padding_mask=None):
+	def forward(self, src, src_mask=None, src_key_padding_mask=None, is_causal=False):
 		att = self.norm1(src)
-		att = self.self_attn(att, att, att, attn_mask=src_mask, key_padding_mask=src_key_padding_mask)[0]
+		att = self.self_attn(att, att, att, attn_mask=src_mask, key_padding_mask=src_key_padding_mask, is_causal=is_causal)[0]
 		att = src + self.dropout1(att)
 
 		out = self.norm2(att)
@@ -191,6 +191,8 @@ class PreNormDecoderLayer(nn.TransformerDecoderLayer):
 		memory_mask=None,
 		tgt_key_padding_mask=None,
 		memory_key_padding_mask=None,
+		tgt_is_causal=False,
+		memory_is_causal=False,
 	):
 		query = self.norm1(tgt)
 		query = self.self_attn(
@@ -199,6 +201,7 @@ class PreNormDecoderLayer(nn.TransformerDecoderLayer):
 			query,
 			attn_mask=tgt_mask,
 			key_padding_mask=tgt_key_padding_mask,
+			is_causal=tgt_is_causal,
 		)[0]
 		query = tgt + self.dropout1(query)
 
@@ -210,6 +213,7 @@ class PreNormDecoderLayer(nn.TransformerDecoderLayer):
 			memory,
 			attn_mask=memory_mask,
 			key_padding_mask=memory_key_padding_mask,
+			is_causal=memory_is_causal,
 		)[0]
 		att = query + self.dropout2(att)
 

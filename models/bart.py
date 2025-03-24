@@ -16,7 +16,7 @@ class BART(nn.Module):
 	def __init__(
 		self, vocab_size: int,
 		d_model: int = 512, n_heads: int = 8, n_layers: int = 6,
-		d_ff: int = 3072, max_seq_len: int = 256,
+		d_ff: int = 2048, max_seq_len: int = 256,
 		dropout: float = 0.1,
 		norm_layer=nn.LayerNorm,
 		activation: str = "swiglu",

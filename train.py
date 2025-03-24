@@ -1,6 +1,7 @@
 from trainer.bart import BARTModel
 # from trainer.vae import BARTVAEModel
 from models.bart import BART
+from models.chemformer import Chemformer
 from models.utils import DyT
 from dataset.chembl import ChemBL35Dataset
 from tokenisers.neocart import SMILESTokenizer

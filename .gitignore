@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Lightning Logs
-lightning_logs/
+lightning_logs*/
 trained_tokenizer.bk/
 
 # Dataset

@@ -1,6 +1,7 @@
 from trainer.bart import BARTModel
 # from trainer.vae import BARTVAEModel
 from models.bart import BART
+from models.chemformer import Chemformer
 from models.utils import DyT
 from dataset.chembl import ChemBL35Dataset, ChemformerChemBL35Dataset
 from tokenisers.neocart import SMILESTokenizer
@@ -28,7 +29,7 @@ if __name__ == "__main__":
 	# 	tokenizer.add_special_tokens({"mask_token": "<mask>"})
 	tokeniser = ChemformerTokenizer(filename="bart_vocab.json")
 
-	ds = ChemformerChemBL35Dataset(smiles_file, tokeniser, max_length=256, noise_prob=0.5)
+	ds = ChemformerChemBL35Dataset(smiles_file, tokeniser, max_length=512, noise_prob=0.5)
 	train_size = int(0.9 * len(ds))
 	val_size = len(ds) - train_size
 	train_ds, val_ds = random_split(ds, [train_size, val_size])
@@ -38,16 +39,17 @@ if __name__ == "__main__":
 
 	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_chembl35")
 
-	model = BART(
+	model = Chemformer(
 		vocab_size=len(tokeniser),
 		norm_layer=nn.LayerNorm,
 		d_model=512,
 		n_heads=8,
 		n_layers=6,
 		d_ff=2048,
+		max_seq_len=512,
 		activation="gelu",
 	)
-	model.load_state_dict(torch.load("chemformer_small.pt", weights_only=True))
+	model.load_state_dict(torch.load("chemformer_small_2.pth", weights_only=True))
 	module = BARTModel(model, tokeniser)
 
 	early_stop_callback = EarlyStopping(
@@ -69,7 +71,7 @@ if __name__ == "__main__":
 		max_epochs=1,	
 		callbacks=[early_stop_callback, checkpoint_callback],
 		logger=logger,
-		limit_test_batches=0.01,
+		limit_test_batches=0.0001,
 	)
 
 	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")

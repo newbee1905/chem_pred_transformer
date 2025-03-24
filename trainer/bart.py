@@ -105,6 +105,7 @@ class BARTModel(pl.LightningModule):
 
 			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 			ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
+			print(gen_smiles_list, ref_smiles_list)
 
 			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 
