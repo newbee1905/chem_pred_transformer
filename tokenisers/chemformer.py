@@ -68,6 +68,11 @@ class ChemformerTokenizer(SMILESTokenizer):
 		self.bos_token_id = self.vocabulary[self.special_tokens["start"]]
 		self.eos_token_id = self.vocabulary[self.special_tokens["end"]]
 
+		self.pad_token = self.special_tokens["pad"]
+		self.mask_token = self.special_tokens["mask"]
+		self.bos_token = self.special_tokens["start"]
+		self.eos_token = self.special_tokens["end"]
+
 	@property
 	def chem_token_idxs(self) -> List[int]:
 		"""Returns the indices of the vocabulary that are chemical tokens"""

@@ -3,7 +3,8 @@ from trainer.bart import BARTModel
 from models.bart import BART
 from models.chemformer import Chemformer
 from models.utils import DyT
-from dataset.chembl import ChemBL35Dataset, ChemformerChemBL35Dataset
+from dataset.chembl import ChemBL35Dataset
+from dataset.zinc import ZincDataset 
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 
@@ -22,14 +23,18 @@ if __name__ == "__main__":
 	RDLogger.DisableLog('rdApp.*')
 
 	smiles_file = "chembl_35.smi"
-	# tokenizer_dir = "trained_tokenizer"
-	#
-	# tokenizer = SMILESTokenizer.from_pretrained(tokenizer_dir)
-	# if tokenizer.mask_token is None:
-	# 	tokenizer.add_special_tokens({"mask_token": "<mask>"})
+	zinc_folder = "data/zinc"
+	tokenizer_dir = "trained_tokenizer"
+
+	# tokeniser = SMILESTokenizer.from_pretrained(tokenizer_dir)
+	# if tokeniser.mask_token is None:
+	# 	tokeniser.add_special_tokens({"mask_token": "<mask>"})
 	tokeniser = ChemformerTokenizer(filename="bart_vocab.json")
 
-	ds = ChemformerChemBL35Dataset(smiles_file, tokeniser, max_length=512, noise_prob=0.5)
+	# ds = ChemBL35Dataset(smiles_file, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="chemformer")
+	# ds = ChemBL35Dataset(smiles_file, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="hf")
+	# ds = ZincDataset(zinc_folder, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="hf")
+	ds = ZincDataset(zinc_folder, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="chemformer")
 	train_size = int(0.9 * len(ds))
 	val_size = len(ds) - train_size
 	train_ds, val_ds = random_split(ds, [train_size, val_size])
@@ -39,17 +44,27 @@ if __name__ == "__main__":
 
 	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_chembl35")
 
-	model = Chemformer(
-		vocab_size=len(tokeniser),
-		norm_layer=nn.LayerNorm,
-		d_model=512,
-		n_heads=8,
-		n_layers=6,
-		d_ff=2048,
-		max_seq_len=512,
-		activation="gelu",
-	)
-	model.load_state_dict(torch.load("chemformer_small_2.pth", weights_only=True))
+	# model = Chemformer(
+	# 	vocab_size=ds.vocab_size,
+	# 	norm_layer=nn.LayerNorm,
+	# 	d_model=512,
+	# 	n_heads=8,
+	# 	n_layers=6,
+	# 	d_ff=2048,
+	# 	max_seq_len=512,
+	# 	activation="gelu",
+	# )
+	# model.load_state_dict(torch.load("chemformer_small_2.pth", weights_only=True))
+	# model = BART(
+	# 	vocab_size=ds.vocab_size,
+	# 	norm_layer=nn.RMSNorm,
+	# 	d_model=512,
+	# 	n_heads=8,
+	# 	n_layers=6,
+	# 	d_ff=2048,
+	# 	max_seq_len=512,
+	# 	activation="swiglu",
+	# )
 	module = BARTModel(model, tokeniser)
 
 	early_stop_callback = EarlyStopping(
@@ -79,3 +94,4 @@ if __name__ == "__main__":
 	# torch.save(module.model.state_dict(), "chemformer_small.pth")
 
 	trainer.test(module, val_dl)
+	# trainer.test(module, val_dl, ckpt_path="train_checkpoints/best-checkpoint.ckpt")

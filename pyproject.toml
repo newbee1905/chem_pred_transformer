@@ -7,8 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "deepspeed>=0.16.4",
     "einops>=0.8.1",
+    "fireducks>=1.2.5",
     "joblib>=1.4.2",
     "lightning>=2.5.0.post0",
+    "pandas>=2.2.3",
     "pysmilesutils",
     "rdkit>=2024.9.6",
     "tensorboard>=2.19.0",
