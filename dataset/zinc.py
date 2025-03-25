@@ -113,7 +113,7 @@ class ZincDataset(PretrainBARTDataset):
 		self.noise_prob = noise_prob
 
 		self.db_path = db_path
-		self.chunked = True
+		self.chunked = chunked
 		self.max_rows_per_chunk = max_rows_per_chunk
 
 		if db_path is not None:
@@ -273,7 +273,7 @@ class ZincDataModule(pl.LightningDataModule):
 				create_lmdb_for_set(data_by_set["test"], self.test_db_path)
 
 	def setup(self, stage=None):
-		self.train_dataset = ZincDataset(
+		self.train_ds = ZincDataset(
 			tokenizer=self.tokenizer,
 			max_length=self.max_length,
 			noise_prob=self.noise_prob,
@@ -282,7 +282,7 @@ class ZincDataModule(pl.LightningDataModule):
 			chunked=self.train_chunked,
 			max_rows_per_chunk=self.max_rows_per_chunk,
 		)
-		self.val_dataset = ZincDataset(
+		self.val_ds = ZincDataset(
 			tokenizer=self.tokenizer,
 			max_length=self.max_length,
 			noise_prob=self.noise_prob,
@@ -291,7 +291,7 @@ class ZincDataModule(pl.LightningDataModule):
 			chunked=self.val_chunked,
 			max_rows_per_chunk=self.max_rows_per_chunk,
 		)
-		self.test_dataset = ZincDataset(
+		self.test_ds = ZincDataset(
 			tokenizer=self.tokenizer,
 			max_length=self.max_length,
 			noise_prob=self.noise_prob,
@@ -303,7 +303,7 @@ class ZincDataModule(pl.LightningDataModule):
 
 	def train_dataloader(self):
 		return DataLoader(
-			self.train_dataset,
+			self.train_ds,
 			batch_size=self.batch_size,
 			num_workers=self.n_workers,
 			shuffle=True
@@ -311,14 +311,14 @@ class ZincDataModule(pl.LightningDataModule):
 
 	def val_dataloader(self):
 		return DataLoader(
-			self.val_dataset,
+			self.val_ds,
 			batch_size=self.batch_size,
 			num_workers=self.n_workers
 		)
 
 	def test_dataloader(self):
 		return DataLoader(
-			self.test_dataset,
+			self.test_ds,
 			batch_size=self.batch_size,
 			num_workers=self.n_workers
 		)
