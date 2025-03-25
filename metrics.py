@@ -14,11 +14,9 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 	def update(self, preds: list, targets: list) -> None:
 		assert len(preds) == len(targets), "Predictions and targets must have the same length"
 
-		device = self.valid_count.device
 		valid_count = 0
 		tanimoto_sum = 0.0
 		tanimoto_count = 0
-		duplicates = 0
 
 		for pred, target in zip(preds, targets):
 			mol_pred = Chem.MolFromSmiles(pred)
@@ -34,7 +32,6 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		self.valid_count += valid_count
 		self.total_count += len(preds)
 		self.tanimoto_sum += tanimoto_sum
-		self.duplicates_count += duplicates
 
 	def compute(self):
 		valid_smiles_ratio = self.valid_count / self.total_count if self.total_count > 0 else torch.tensor(0.0)
