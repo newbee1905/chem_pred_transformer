@@ -40,11 +40,11 @@ if __name__ == "__main__":
 
 	vocab_size = tokenizer.vocab_size
 
-	dm = ZincDataModule(zinc_folder, zinc_folder, tokenizer, batch_size=2)
+	dm = ZincDataModule(zinc_folder, zinc_folder, tokenizer, batch_size=2, train_chunked=True)
 
 	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_zinc")
 	csv_logger = CSVLogger("logs", name="pretrain_random_smiles_zinc")
-	
+
 	model = BART(
 		vocab_size=vocab_size,
 		norm_layer=nn.RMSNorm,
@@ -57,7 +57,7 @@ if __name__ == "__main__":
 	# model.load_state_dict(torch.load("_pretrained_model.pt", weights_only=True))
 	print(model)
 	module = BARTModel(model, tokenizer)
-	
+
 	early_stop_callback = EarlyStopping(
 		monitor="val_loss",
 		patience=5,
@@ -65,7 +65,7 @@ if __name__ == "__main__":
 		min_delta=0.001,
 		mode="min"
 	)
-	
+
 	checkpoint_callback = ModelCheckpoint(
 		monitor="val_loss",
 		dirpath="train_checkpoints",
@@ -73,9 +73,9 @@ if __name__ == "__main__":
 		save_top_k=2,
 		mode="min"
 	)
-	
+
 	timer = Timer(duration="00:20:00:00")
-	
+
 	trainer = pl.Trainer(
 		max_epochs=1000,	
 		val_check_interval=500,
@@ -85,7 +85,7 @@ if __name__ == "__main__":
 		limit_train_batches=0.005,
 		limit_val_batches=0.1,
 	)
-	
+
 	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
 	trainer.fit(module, dm)
 	torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")
