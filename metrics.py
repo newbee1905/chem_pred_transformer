@@ -16,6 +16,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 	def update(self, preds: list, targets: list) -> None:
 		assert len(preds) == len(targets), "Predictions and targets must have the same length"
 
+		device = self.valid_count.device
 		valid_count = 0
 		tanimoto_sum = 0.0
 		tanimoto_count = 0
@@ -30,7 +31,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 				fp_target = AllChem.GetMorganFingerprintAsBitVect(mol_target, 2, nBits=1024)
 				tanimoto_sum += DataStructs.TanimotoSimilarity(fp_pred, fp_target)
 
-				pred_tensor = torch.tensor(hash(pred))
+				pred_tensor = torch.tensor([hash(pred)], dtype=torch.long, device=device)
 				if self.unique_smiles_set.numel() > 0 and (self.unique_smiles_set == pred_tensor[0]).any():
 					duplicates += 1
 				else:
