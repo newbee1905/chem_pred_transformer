@@ -129,8 +129,6 @@ class BARTModel(pl.LightningModule):
 				"v_top5_acc": avg_top5,
 				"v_valid": scores["valid_smiles_ratio"],
 				"v_avg_tanimoto": scores["avg_tanimoto"],
-				"v_unique_ratio": scores["unique_ratio"],
-				"v_dup_ratio": scores["duplicate_ratio"],
 			}, prog_bar=True, sync_dist=True)
 		else:
 			self.log_dict({
@@ -207,8 +205,6 @@ class BARTModel(pl.LightningModule):
 			"t_top5_acc": avg_top5,
 			"t_valid_smiles_ratio": scores["valid_smiles_ratio"],
 			"t_avg_tanimoto": scores["avg_tanimoto"],
-			"t_unique_ratio": scores["unique_ratio"],
-			"t_dup_ratio": scores["duplicate_ratio"],
 			"t_gen_ct": avg_gen_ct,
 		}, prog_bar=True, sync_dist=True)
 
