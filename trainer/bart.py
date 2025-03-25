@@ -125,16 +125,17 @@ class BARTModel(pl.LightningModule):
 			avg_gen_ct = (sum(self.generate_times) / len(self.generate_times) if self.generate_times else 0.0)
 
 			self.log_dict({
-				"val_top1_acc": avg_top1,
-				"val_top5_acc": avg_top5,
-				"val_valid_smiles_ratio": scores["valid_smiles_ratio"],
-				"val_avg_tanimoto": scores["avg_tanimoto"],
-				"val_gen_ct": avg_gen_ct,
+				"v_top1_acc": avg_top1,
+				"v_top5_acc": avg_top5,
+				"v_valid": scores["valid_smiles_ratio"],
+				"v_avg_tanimoto": scores["avg_tanimoto"],
+				"v_unique_ratio": scores["unique_ratio"],
+				"v_dup_ratio": scores["duplicate_ratio"],
 			}, prog_bar=True, sync_dist=True)
 		else:
 			self.log_dict({
-				"val_top1_acc": avg_top1,
-				"val_top5_acc": avg_top5,
+				"v_top1_acc": avg_top1,
+				"v_top5_acc": avg_top5,
 			}, prog_bar=True, sync_dist=True)
 
 		self.val_top1_acc.clear()
@@ -202,11 +203,13 @@ class BARTModel(pl.LightningModule):
 		avg_gen_ct = (sum(self.generate_times) / len(self.generate_times) if self.generate_times else 0.0)
 
 		self.log_dict({
-			"test_top1_acc": avg_top1,
-			"test_top5_acc": avg_top5,
-			"test_valid_smiles_ratio": scores["valid_smiles_ratio"],
-			"test_avg_tanimoto": scores["avg_tanimoto"],
-			"test_gen_ct": avg_gen_ct,
+			"t_top1_acc": avg_top1,
+			"t_top5_acc": avg_top5,
+			"t_valid_smiles_ratio": scores["valid_smiles_ratio"],
+			"t_avg_tanimoto": scores["avg_tanimoto"],
+			"t_unique_ratio": scores["unique_ratio"],
+			"t_dup_ratio": scores["duplicate_ratio"],
+			"t_gen_ct": avg_gen_ct,
 		}, prog_bar=True, sync_dist=True)
 
 		self.test_top1_acc.clear()
