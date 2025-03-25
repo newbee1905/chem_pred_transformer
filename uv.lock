@@ -153,6 +153,7 @@ dependencies = [
     { name = "fireducks" },
     { name = "joblib" },
     { name = "lightning" },
+    { name = "lmdb" },
     { name = "pandas" },
     { name = "pysmilesutils" },
     { name = "rdkit" },
@@ -160,6 +161,7 @@ dependencies = [
     { name = "tensorboardx" },
     { name = "torch" },
     { name = "torchmetrics" },
+    { name = "tqdm-joblib" },
     { name = "transformers" },
     { name = "xformers" },
 ]
@@ -171,6 +173,7 @@ requires-dist = [
     { name = "fireducks", specifier = ">=1.2.5" },
     { name = "joblib", specifier = ">=1.4.2" },
     { name = "lightning", specifier = ">=2.5.0.post0" },
+    { name = "lmdb", specifier = ">=1.6.2" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pysmilesutils", git = "https://github.com/MolecularAI/pysmilesutils" },
     { name = "rdkit", specifier = ">=2024.9.6" },
@@ -178,6 +181,7 @@ requires-dist = [
     { name = "tensorboardx", specifier = ">=2.6.2.2" },
     { name = "torch", specifier = ">=2.6.0" },
     { name = "torchmetrics", specifier = ">=1.6.3" },
+    { name = "tqdm-joblib", specifier = ">=0.0.4" },
     { name = "transformers", specifier = ">=4.49.0" },
     { name = "xformers", specifier = ">=0.0.29.post3" },
 ]
@@ -426,6 +430,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f3/47/d2c2d874e4f5ae14fa1f9f0970a23ba94e3acf555cf11aead9c2bb30d938/lightning_utilities-0.14.0.tar.gz", hash = "sha256:9ab2424c1d44d90c9c74d6d9fe64f05e5613b8c29f94f6d407b9054cc7aee95e", size = 30205 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/44/ef/b48a8bba9d0ac84141049c71ad32adcfed030d10ac2963c7c3c8c0e66091/lightning_utilities-0.14.0-py3-none-any.whl", hash = "sha256:29cd0e0d1aff903667c0111eee6d96e804261ad6d4a009be7f7da71520927314", size = 28897 },
+]
+
+[[package]]
+name = "lmdb"
+version = "1.6.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/54/fb1d5918406a72fcf46fbfaece7c0349d88cd8685f5443a142ddd7dac05b/lmdb-1.6.2.tar.gz", hash = "sha256:d28e3fa59935ff688858760ec52f202ecb8c1089a3f68d1f162ea3078d151e73", size = 881434 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/51/865bebe671305ae05fc42a65f4a2282a0f30c93ad1cad3d47ba863db2c8e/lmdb-1.6.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:5dc6885b764aaccd2ecb6b244dc3ecbcce8b65d6f7e5b36fb39a603359909650", size = 166526 },
+    { url = "https://files.pythonhosted.org/packages/bc/0a/b8055af1668b16e513ed476caa06578e7d942f665c2b11b4dbbbb8de048a/lmdb-1.6.2-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:de252e4a7895a0f1f8422b30c7f5b432612145538cf09e073b57f68fc5a88977", size = 298099 },
+    { url = "https://files.pythonhosted.org/packages/61/08/002b7a3d165115b214aff2e8333e511dc54ce64c02ece5500542f13c080b/lmdb-1.6.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4c45d63a49a17ab2caa5ec0d1da35bc81c5c85fa38dfb6ab7eacf817242334a7", size = 300995 },
+    { url = "https://files.pythonhosted.org/packages/4f/9a/180a933735df820680160ce86d49dab3fe6a2ae557c256b85b8177b98843/lmdb-1.6.2-cp312-cp312-win_amd64.whl", hash = "sha256:129379009c65e67187208eff75cdad74f4ae6f840521498f3e2da407ce5aaf66", size = 100604 },
+    { url = "https://files.pythonhosted.org/packages/4e/c8/78631801528f70ea8ded2a840b5e9064742fbcbe73f44ad31794214fae22/lmdb-1.6.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:3be24aa18f160958b90605fe5882b66998f9fa3d97221478d49782bd8f88392a", size = 168187 },
+    { url = "https://files.pythonhosted.org/packages/cd/64/38cef7aa933d8f50bd8e54b9e5479de5ac13cd6af5adf61310893c0b8831/lmdb-1.6.2-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:32154f561d5cdbe833798401a752868bb1a9c056d8de1e8faf92e62ca8f22999", size = 299537 },
+    { url = "https://files.pythonhosted.org/packages/54/69/7116305b2f6fde1d79695d9ea40b29ec2b9d4e2f7b8f36d24eb0ee4e9797/lmdb-1.6.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:45c772f24089a7ff1ebd8c59c6dc7f2da0c7b8b704b5e83ee9687c44c764554b", size = 302100 },
+    { url = "https://files.pythonhosted.org/packages/6e/16/d3c00e86c6dd6a0e09e247e64cf169cfe02ccb55ba2bb63663bcaf79d012/lmdb-1.6.2-cp313-cp313-win_amd64.whl", hash = "sha256:d9676fcba2cd388f24a5d15055e4a6de351e1df9febf5b176c93cd39cc80585e", size = 100665 },
 ]
 
 [[package]]
@@ -1337,6 +1357,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2", size = 78540 },
+]
+
+[[package]]
+name = "tqdm-joblib"
+version = "0.0.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7f/f8/f35c4bcc48408ef145634521f1603149613fd9ab89279b58df1e4fb17d3b/tqdm_joblib-0.0.4.tar.gz", hash = "sha256:8588e0d04aa5d51a0fae3ce68206045a8117ec695daddeaea3012dfd8869d2a5", size = 1692 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3e/a7/baca7170afdf872ec30385064cf03e50f6c047e315d854385a889ba6e803/tqdm_joblib-0.0.4-py3-none-any.whl", hash = "sha256:786f4423f2282701db7959a2b4449d1e3ab60b4841f5a6d03ec49e8cb8946e0b", size = 1718 },
 ]
 
 [[package]]

@@ -1,17 +1,26 @@
+import os
+import joblib
+from joblib import parallel_config
+import pickle
+from io import BytesIO
+import lmdb
+from tqdm import tqdm
+from tqdm_joblib import tqdm_joblib
+
 from trainer.bart import BARTModel
 # from trainer.vae import BARTVAEModel
 from models.bart import BART
 from models.chemformer import Chemformer
 from models.utils import DyT
 from dataset.chembl import ChemBL35Dataset
-from dataset.zinc import ZincDataset, load_smiles_by_set
+from dataset.zinc import ZincDataModule
 from tokenisers.neocart import SMILESTokenizer
 
 import torch
 from torch.utils.data import DataLoader, random_split
 import torch.nn as nn
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, Timer
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 
 if __name__ == "__main__":
@@ -31,25 +40,11 @@ if __name__ == "__main__":
 
 	vocab_size = tokenizer.vocab_size
 
-	# ds = ChemBL35Dataset(smiles_file, tokenizer, max_length=256, noise_prob=0.5)
-	# train_size = int(0.9 * len(ds))
-	# val_size = len(ds) - train_size
-	# train_ds, val_ds = random_split(ds, [train_size, val_size])
-
-	data_splits = load_smiles_by_set(zinc_folder)
-	print(len(data_splits["train"]["smiles"]))
-	print(len(data_splits["val"]["smiles"]))
-
-	train_ds = ZincDataset(data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer)
-	val_ds = ZincDataset(data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer)
-	test_ds = ZincDataset(data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer)
-
-	train_dl = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=10)
-	val_dl = DataLoader(val_ds, batch_size=2, shuffle=False, num_workers=10)
+	dm = ZincDataModule(zinc_folder, zinc_folder, tokenizer, batch_size=2)
 
 	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_zinc")
 	csv_logger = CSVLogger("logs", name="pretrain_random_smiles_zinc")
-
+	
 	model = BART(
 		vocab_size=vocab_size,
 		norm_layer=nn.RMSNorm,
@@ -62,7 +57,7 @@ if __name__ == "__main__":
 	# model.load_state_dict(torch.load("_pretrained_model.pt", weights_only=True))
 	print(model)
 	module = BARTModel(model, tokenizer)
-
+	
 	early_stop_callback = EarlyStopping(
 		monitor="val_loss",
 		patience=5,
@@ -70,7 +65,7 @@ if __name__ == "__main__":
 		min_delta=0.001,
 		mode="min"
 	)
-
+	
 	checkpoint_callback = ModelCheckpoint(
 		monitor="val_loss",
 		dirpath="train_checkpoints",
@@ -78,18 +73,19 @@ if __name__ == "__main__":
 		save_top_k=2,
 		mode="min"
 	)
-
+	
+	timer = Timer(duration="00:20:00:00")
+	
 	trainer = pl.Trainer(
 		max_epochs=1000,	
 		val_check_interval=500,
-		callbacks=[early_stop_callback, checkpoint_callback],
+		callbacks=[early_stop_callback, checkpoint_callback, timer],
 		logger=[csv_logger, logger],
 		gradient_clip_val=1.0,
-		# limit_test_batches=0.0001,
-		limit_train_batches=0.045,
+		limit_train_batches=0.005,
 		limit_val_batches=0.1,
 	)
-
+	
 	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
-	trainer.fit(module, train_dl, val_dl)
+	trainer.fit(module, dm)
 	torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")

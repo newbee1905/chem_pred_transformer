@@ -43,8 +43,7 @@ class PretrainBARTDataset(Dataset):
 			"attention_mask": attn_mask,
 		}
 
-	def __getitem__(self, idx):
-		org_smi = self.smiles_list[idx]
+	def get_smi_data(self, org_smi):
 		mol = Chem.MolFromSmiles(org_smi)
 		if mol is None:
 			inp_smi = org_smi
@@ -107,6 +106,10 @@ class PretrainBARTDataset(Dataset):
 			"attention_mask": attn_mask,
 			"labels": labels
 		}
+
+	def __getitem__(self, idx):
+		org_smi = self.smiles_list[idx]
+		return self.get_smi_data(org_smi)
 
 	def __len__(self):
 		return len(self.smiles_list)

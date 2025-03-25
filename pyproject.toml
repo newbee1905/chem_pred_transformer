@@ -10,6 +10,7 @@ dependencies = [
     "fireducks>=1.2.5",
     "joblib>=1.4.2",
     "lightning>=2.5.0.post0",
+    "lmdb>=1.6.2",
     "pandas>=2.2.3",
     "pysmilesutils",
     "rdkit>=2024.9.6",
@@ -17,6 +18,7 @@ dependencies = [
     "tensorboardx>=2.6.2.2",
     "torch>=2.6.0",
     "torchmetrics>=1.6.3",
+    "tqdm-joblib>=0.0.4",
     "transformers>=4.49.0",
     "xformers>=0.0.29.post3",
 ]
