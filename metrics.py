@@ -10,7 +10,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		self.add_state("valid_count", default=torch.tensor(0), dist_reduce_fx="sum")
 		self.add_state("total_count", default=torch.tensor(0), dist_reduce_fx="sum")
 		self.add_state("tanimoto_sum", default=torch.tensor(0.0), dist_reduce_fx="sum")
-		self.add_state("unique_smiles_set", default=torch.tensor([]), dist_reduce_fx="cat")
+		self.add_state("unique_smiles_set", default=torch.tensor([], dtype=torch.long), dist_reduce_fx="cat")
 		self.add_state("duplicates_count", default=torch.tensor(0), dist_reduce_fx="sum")
 
 	def update(self, preds: list, targets: list) -> None:
@@ -31,10 +31,10 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 				tanimoto_sum += DataStructs.TanimotoSimilarity(fp_pred, fp_target)
 
 				pred_tensor = torch.tensor(hash(pred))
-				if pred_tensor in self.unique_smiles_set:
+				if self.unique_smiles_set.numel() > 0 and (self.unique_smiles_set == pred_tensor[0]).any():
 					duplicates += 1
 				else:
-					self.unique_smiles_set = torch.cat([self.unique_smiles_set, pred_tensor.unsqueeze(0)])
+					self.unique_smiles_set = torch.cat([self.unique_smiles_set, pred_tensor])
 
 				valid_count += 1
 
@@ -46,7 +46,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 	def compute(self):
 		valid_smiles_ratio = self.valid_count / self.total_count if self.total_count > 0 else torch.tensor(0.0)
 		avg_tanimoto = self.tanimoto_sum / self.valid_count if self.valid_count > 0 else torch.tensor(0.0)
-		unique_ratio = len(self.unique_smiles_set) / self.total_count if self.total_count > 0 else torch.tensor(0.0)
+		unique_ratio = self.unique_smiles_set.numel() / self.total_count if self.total_count > 0 else torch.tensor(0.0)
 		duplicate_ratio = self.duplicates_count / self.total_count if self.total_count > 0 else torch.tensor(0.0)
 
 		return {
@@ -61,5 +61,5 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		self.valid_count.zero_()
 		self.total_count.zero_()
 		self.tanimoto_sum.zero_()
-		self.unique_smiles_set = torch.tensor([])
+		self.unique_smiles_set = torch.tensor([], dtype=torch.long)
 		self.duplicates_count.zero_()
