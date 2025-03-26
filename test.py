@@ -29,12 +29,10 @@ if __name__ == "__main__":
 	# tokeniser = SMILESTokenizer.from_pretrained(tokenizer_dir)
 	# if tokeniser.mask_token is None:
 	# 	tokeniser.add_special_tokens({"mask_token": "<mask>"})
-	tokeniser = ChemformerTokenizer(filename="bart_vocab.json")
+	tokenizer = ChemformerTokenizer(filename="bart_vocab.json")
 
-	# ds = ChemBL35Dataset(smiles_file, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="chemformer")
+	ds = ChemBL35Dataset(smiles_file, tokenizer, max_length=512, noise_prob=0.5, span_lambda=1, tokenizer_type="chemformer")
 	# ds = ChemBL35Dataset(smiles_file, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="hf")
-	# ds = ZincDataset(zinc_folder, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="hf")
-	ds = ZincDataset(zinc_folder, tokeniser, max_length=512, noise_prob=0.5, tokenizer_type="chemformer")
 	train_size = int(0.9 * len(ds))
 	val_size = len(ds) - train_size
 	train_ds, val_ds = random_split(ds, [train_size, val_size])
@@ -55,17 +53,17 @@ if __name__ == "__main__":
 	# 	activation="gelu",
 	# )
 	# model.load_state_dict(torch.load("chemformer_small_2.pth", weights_only=True))
-	# model = BART(
-	# 	vocab_size=ds.vocab_size,
-	# 	norm_layer=nn.RMSNorm,
-	# 	d_model=512,
-	# 	n_heads=8,
-	# 	n_layers=6,
-	# 	d_ff=2048,
-	# 	max_seq_len=512,
-	# 	activation="swiglu",
-	# )
-	module = BARTModel(model, tokeniser)
+	model = BART(
+		vocab_size=ds.vocab_size,
+		norm_layer=nn.RMSNorm,
+		d_model=512,
+		n_heads=8,
+		n_layers=6,
+		d_ff=2048,
+		max_seq_len=512,
+		activation="swiglu",
+	)
+	module = BARTModel(model, tokenizer)
 
 	early_stop_callback = EarlyStopping(
 		monitor="val_loss",
@@ -93,5 +91,5 @@ if __name__ == "__main__":
 	# trainer.fit(module, train_dl, val_dl)
 	# torch.save(module.model.state_dict(), "chemformer_small.pth")
 
-	trainer.test(module, val_dl)
-	# trainer.test(module, val_dl, ckpt_path="train_checkpoints/best-checkpoint.ckpt")
+	# trainer.test(module, val_dl)
+	trainer.test(module, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v4.ckpt")

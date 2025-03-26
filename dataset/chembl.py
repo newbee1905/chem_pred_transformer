@@ -14,7 +14,8 @@ class ChemBL35Dataset(PretrainBARTDataset):
 		smiles_file: str,
 		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer,
 		max_length: int = 64,
-		noise_prob: float = 0.25,
+		noise_prob: float = 0.5,
+		span_lambda: float = 3,
 		tokenizer_type: str = "hf"
 	):
 		with open(smiles_file, "r", encoding="utf-8") as f:
@@ -28,4 +29,4 @@ class ChemBL35Dataset(PretrainBARTDataset):
 		else:
 			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
-		super().__init__(tokenizer, max_length, noise_prob)
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda)

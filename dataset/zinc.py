@@ -100,6 +100,7 @@ class ZincDataset(PretrainBARTDataset):
 		tokenizer,
 		max_length: int = 512,
 		noise_prob: float = 0.5,
+		span_lambda: float = 3,
 		tokenizer_type: str = "hf",
 		smiles_list: list[str] = None,
 		db_path: str = None,
@@ -107,10 +108,7 @@ class ZincDataset(PretrainBARTDataset):
 		max_rows_per_chunk: int = 10000000,
 	):
 		self.tokenizer_type = tokenizer_type
-		self.tokenizer = tokenizer
-
-		self.max_length = max_length
-		self.noise_prob = noise_prob
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
 
 		self.db_path = db_path
 		self.chunked = chunked

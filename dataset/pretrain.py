@@ -11,10 +11,11 @@ class PretrainBARTDataset(Dataset):
 	Base class for BART-style pretraining datasets.
 	"""
 	
-	def __init__(self, tokenizer, max_length: int = 64, noise_prob: float = 0.5):
+	def __init__(self, tokenizer, max_length: int = 64, noise_prob: float = 0.5, span_lambda: float = 3.0):
 		self.tokenizer = tokenizer
 		self.max_length = max_length
 		self.noise_prob = noise_prob
+		self.span_lambda = span_lambda
 
 	def encode_and_pad(self, smiles: str) -> dict:
 		"""
@@ -42,6 +43,59 @@ class PretrainBARTDataset(Dataset):
 			"input_ids": token_ids,
 			"attention_mask": attn_mask,
 		}
+
+	def span_mask_tokens(self, token_ids: torch.Tensor) -> torch.Tensor:
+		"""
+		Applies span masking to the token_ids.
+		Iterates over the sequence and, with probability noise_prob, masks a contiguous span.
+		"""
+
+		masked_ids = token_ids.clone()
+		noise_mask = torch.zeros_like(token_ids, dtype=torch.bool)
+		pad_id = self.tokenizer.pad_token_id
+		mask_id = self.tokenizer.mask_token_id
+
+		length = masked_ids.size(0)
+		i = 0
+		masked = False
+
+		while i < length:
+			if token_ids[i] == pad_id:
+				break
+
+			if torch.rand(1).item() < self.noise_prob:
+				span_length = max(
+					1,
+					int(torch.poisson(
+						torch.tensor(self.span_lambda, dtype=torch.float, device=token_ids.device)
+					).item())
+				)
+
+				# Move end pointer forward, but stop if we hit a pad token
+				end = i
+				count = 0
+				while end < length and count < span_length and token_ids[end] != pad_id:
+					end += 1
+					count += 1
+				
+				if end > i:
+					masked_ids[i:end] = mask_id
+					noise_mask[i:end] = True
+					masked_any = True
+
+				i = end
+			else:
+				i += 1
+
+		if not masked:
+			valid_indices = (token_ids != pad_id).nonzero(as_tuple=False).view(-1)
+
+			if valid_indices.numel() > 0:
+				rand_idx = valid_indices[torch.randint(0, valid_indices.numel(), (1,)).item()]
+				masked_ids[rand_idx] = mask_id
+				noise_mask[rand_idx] = True 
+
+		return masked_ids, noise_mask
 
 	def get_smi_data(self, org_smi):
 		mol = Chem.MolFromSmiles(org_smi)
@@ -93,17 +147,12 @@ class PretrainBARTDataset(Dataset):
 		else:
 			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
-		non_pad_indices = (attn_mask == 1).nonzero(as_tuple=True)[0]
-		num_to_mask = max(1, int(len(non_pad_indices) * self.noise_prob))
-		mask_indices = torch.randperm(len(non_pad_indices))[:num_to_mask]
-		selected_mask_positions = non_pad_indices[mask_indices]
-
-		noisy_inp_ids = inp_ids.clone()
-		noisy_inp_ids[selected_mask_positions] = self.tokenizer.mask_token_id
+		noisy_inp_ids, noise_mask = self.span_mask_tokens(inp_ids)
 
 		return {
 			"input_ids": noisy_inp_ids,
 			"attention_mask": attn_mask,
+			"noise_mask": noise_mask,
 			"labels": labels
 		}
 

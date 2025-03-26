@@ -13,8 +13,9 @@ from models.bart import BART
 from models.chemformer import Chemformer
 from models.utils import DyT
 from dataset.chembl import ChemBL35Dataset
-from dataset.zinc import ZincDataModule
+from dataset.zinc import ZincDataset, ZincDataModule
 from tokenisers.neocart import SMILESTokenizer
+from tokenisers.chemformer import ChemformerTokenizer
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -30,7 +31,7 @@ if __name__ == "__main__":
 	from rdkit import RDLogger
 	RDLogger.DisableLog('rdApp.*')
 
-	# smiles_file = "chembl_35.smi"
+	smiles_file = "chembl_35.smi"
 	zinc_folder = "data/zinc"
 	tokenizer_dir = "trained_tokenizer"
 
@@ -40,7 +41,35 @@ if __name__ == "__main__":
 
 	vocab_size = tokenizer.vocab_size
 
-	dm = ZincDataModule(zinc_folder, zinc_folder, tokenizer, batch_size=2, train_chunked=True)
+	# tokenizer = ChemformerTokenizer(filename="bart_vocab.json")
+	# vocab_size = len(tokenizer)
+
+	# dm = ZincDataModule(zinc_folder, zinc_folder, tokenizer, batch_size=2, train_chunked=True)
+	ds = ChemBL35Dataset(smiles_file, tokenizer, max_length=512, noise_prob=0.5, span_lambda=3, tokenizer_type="hf")
+	train_size = int(0.9 * len(ds))
+	val_size = len(ds) - train_size
+	train_ds, val_ds = random_split(ds, [train_size, val_size])
+
+	# for idx in range(len(val_ds)):
+	# 	if idx > 5:
+	# 		break
+	# 	sample = val_ds[idx]
+	# 	# Decode input and label tokens for inspection:
+	# 	input_decoded = tokenizer.decode(sample["input_ids"].tolist(), skip_special_tokens=False)
+	# 	label_decoded = tokenizer.decode(sample["labels"].tolist(), skip_special_tokens=False)
+	#
+	# 	print(f"Example {idx+1}:")
+	# 	print("Input IDs:", sample["input_ids"])
+	# 	print("Noise Mask:", sample.get("noise_mask", "Not Provided"))
+	# 	print("Decoded Input:", input_decoded)
+	# 	print("Labels:", sample["labels"])
+	# 	print("Decoded Labels:", label_decoded)
+	# 	print("-" * 50)
+	
+	# train_dl = DataLoader(train_ds, batch_size=64, shuffle=True, num_workers=4)
+	# val_dl = DataLoader(val_ds, batch_size=64, shuffle=False, num_workers=4)
+	train_dl = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=4)
+	val_dl = DataLoader(val_ds, batch_size=2, shuffle=False, num_workers=4)
 
 	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_zinc")
 	csv_logger = CSVLogger("logs", name="pretrain_random_smiles_zinc")
@@ -78,14 +107,15 @@ if __name__ == "__main__":
 
 	trainer = pl.Trainer(
 		max_epochs=1000,	
-		val_check_interval=500,
+		# val_check_interval=500,
 		callbacks=[early_stop_callback, checkpoint_callback, timer],
 		logger=[csv_logger, logger],
 		gradient_clip_val=1.0,
 		limit_train_batches=0.005,
-		limit_val_batches=0.1,
+		limit_val_batches=0.001,
 	)
 
 	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
-	trainer.fit(module, dm)
+	# trainer.fit(module, dm)
+	trainer.fit(module, train_dl, val_dl)
 	torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")
