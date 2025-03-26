@@ -24,7 +24,7 @@ from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
 
 class BARTModel(pl.LightningModule):
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256, mode: str = "pretrain"):
+	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 512, mode: str = "pretrain"):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
@@ -38,8 +38,6 @@ class BARTModel(pl.LightningModule):
 
 		self.smiles_metric = SMILESEvaluationMetric()
 		self.max_length = max_length
-
-		self.generate_times = []
 
 		self.mode = "pretrain"
 
@@ -95,7 +93,6 @@ class BARTModel(pl.LightningModule):
 		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
 
 		if self.current_epoch % 5 == 4:
-			start_time = time.time()
 			generated_tokens = self.model.generate(
 				src.to(self.device),
 				self.max_length,
@@ -103,7 +100,6 @@ class BARTModel(pl.LightningModule):
 				self.tokenizer.eos_token_id,
 			)
 			generated_tokens = generated_tokens.cpu()
-			self.generate_times.append(time.time() - start_time)
 
 			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 			ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
@@ -122,24 +118,23 @@ class BARTModel(pl.LightningModule):
 		if self.current_epoch % 5 == 4:
 			scores = self.smiles_metric.compute()
 
-			avg_gen_ct = (sum(self.generate_times) / len(self.generate_times) if self.generate_times else 0.0)
-
 			self.log_dict({
-				"v_top1_acc": avg_top1,
-				"v_top5_acc": avg_top5,
+				"v_top1": avg_top1,
+				"v_top5": avg_top5,
 				"v_valid": scores["valid_smiles_ratio"],
-				"v_avg_tanimoto": scores["avg_tanimoto"],
+				"v_tanimoto": scores["avg_tanimoto"],
+				"v_unique": scores["unique_ratio"],
+				"v_dup_ratio": scores["duplicate_ratio"],
 			}, prog_bar=True, sync_dist=True)
 		else:
 			self.log_dict({
-				"v_top1_acc": avg_top1,
-				"v_top5_acc": avg_top5,
+				"val_top1_acc": avg_top1,
+				"val_top5_acc": avg_top5,
 			}, prog_bar=True, sync_dist=True)
 
 		self.val_top1_acc.clear()
 		self.val_top5_acc.clear()
 
-		self.generate_times.clear()
 		self.smiles_metric.reset()
 
 	def test_step(self, batch, batch_idx):
@@ -171,7 +166,6 @@ class BARTModel(pl.LightningModule):
 		self.test_top5_acc.append(top5_acc)
 		self.log("test_loss", loss, prog_bar=True, sync_dist=True)
 
-		start_time = time.time()
 		generated_tokens = self.model.generate(
 			src.to(self.device),
 			self.max_length,
@@ -179,13 +173,9 @@ class BARTModel(pl.LightningModule):
 			self.tokenizer.eos_token_id,
 		)
 		generated_tokens = generated_tokens.cpu()
-		self.generate_times.append(time.time() - start_time)
 
 		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-		print("-------------------------")
-		print(gen_smiles_list)
-		print(ref_smiles_list)
 
 		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 		torch.cuda.empty_cache()
@@ -198,20 +188,18 @@ class BARTModel(pl.LightningModule):
 
 		scores = self.smiles_metric.compute()
 
-		avg_gen_ct = (sum(self.generate_times) / len(self.generate_times) if self.generate_times else 0.0)
-
 		self.log_dict({
-			"t_top1_acc": avg_top1,
-			"t_top5_acc": avg_top5,
-			"t_valid_smiles_ratio": scores["valid_smiles_ratio"],
-			"t_avg_tanimoto": scores["avg_tanimoto"],
-			"t_gen_ct": avg_gen_ct,
+			"t_top1": avg_top1,
+			"t_top5": avg_top5,
+			"t_valid": scores["valid_smiles_ratio"],
+			"t_tanimoto": scores["avg_tanimoto"],
+			"t_unique": scores["unique_ratio"],
+			"t_dup_ratio": scores["duplicate_ratio"],
 		}, prog_bar=True, sync_dist=True)
 
 		self.test_top1_acc.clear()
 		self.test_top5_acc.clear()
 
-		self.generate_times.clear()
 		self.smiles_metric.reset()
 
 	def configure_optimizers(self):
