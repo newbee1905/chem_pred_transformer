@@ -123,29 +123,25 @@ class BARTModel(pl.LightningModule):
 		self.log("v_top1", top1_acc, prog_bar=True, sync_dist=True)
 		self.log("v_top5", top5_acc, prog_bar=True, sync_dist=True)
 
-		if self.current_epoch % 5 == 4:
-			generated_tokens = self.model.generate(
-				src.to(self.device),
-				self.max_length,
-				self.tokenizer.bos_token_id,
-				self.tokenizer.eos_token_id,
-			)
-			generated_tokens = generated_tokens.cpu()
+		generated_tokens = self.model.generate(
+			src.to(self.device),
+			self.max_length,
+			self.tokenizer.bos_token_id,
+			self.tokenizer.eos_token_id,
+		)
+		generated_tokens = generated_tokens.cpu()
 
-			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-			ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-			# print(gen_smiles_list, ref_smiles_list)
+		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
+		# print(gen_smiles_list, ref_smiles_list)
 
-			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
+		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 
-			torch.cuda.empty_cache()
+		torch.cuda.empty_cache()
 
 		return loss
 
 	def on_validation_epoch_end(self):
-		if self.current_epoch % 5 != 4:
-			return
-
 		scores = self.smiles_metric.compute()
 
 		self.log_dict({
