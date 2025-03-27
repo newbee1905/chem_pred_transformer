@@ -22,6 +22,8 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		tanimoto_count = 0
 		duplicates = 0
 
+		self.unique_smiles_set = self.unique_smiles_set.to(device)
+
 		for pred, target in zip(preds, targets):
 			mol_pred = Chem.MolFromSmiles(pred)
 			mol_target = Chem.MolFromSmiles(target)

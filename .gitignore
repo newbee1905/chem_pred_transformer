@@ -25,4 +25,5 @@ chembl_35.smi
 **/*.ckpt
 
 data/*
+*.out
 
