@@ -81,7 +81,7 @@ class PretrainBARTDataset(Dataset):
 				if end > i:
 					masked_ids[i:end] = mask_id
 					noise_mask[i:end] = True
-					masked_any = True
+					masked = True
 
 				i = end
 			else:

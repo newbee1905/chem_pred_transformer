@@ -3,19 +3,19 @@ import joblib
 from joblib import parallel_config
 import pickle
 from io import BytesIO
-import lmdb
 from tqdm import tqdm
-from tqdm_joblib import tqdm_joblib
 
 from trainer.bart import BARTModel
 # from trainer.vae import BARTVAEModel
 from models.bart import BART
 from models.chemformer import Chemformer
 from models.utils import DyT
-from dataset.chembl import ChemBL35Dataset
-from dataset.zinc import ZincDataset, ZincDataModule
+from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
+from dataset.zinc import ZincDataset, load_smiles_by_set
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
+
+from utils import set_seed
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -31,7 +31,10 @@ if __name__ == "__main__":
 	from rdkit import RDLogger
 	RDLogger.DisableLog('rdApp.*')
 
+	set_seed(24)
+
 	smiles_file = "chembl_35.smi"
+	smiles_joblib_file = "filtered_chembl_smiles.joblib"
 	zinc_folder = "data/zinc"
 	tokenizer_dir = "trained_tokenizer"
 
@@ -44,14 +47,26 @@ if __name__ == "__main__":
 	# tokenizer = ChemformerTokenizer(filename="bart_vocab.json")
 	# vocab_size = len(tokenizer)
 
-	# dm = ZincDataModule(zinc_folder, zinc_folder, tokenizer, batch_size=2, train_chunked=True)
-	ds = ChemBL35Dataset(smiles_file, tokenizer, max_length=512, noise_prob=0.5, span_lambda=3, tokenizer_type="hf")
+	ds = ChemBL35FilteredDataset(smiles_joblib_file, tokenizer, max_length=256, noise_prob=0.2, span_lambda=2, tokenizer_type="hf")
 	train_size = int(0.9 * len(ds))
 	val_size = len(ds) - train_size
 	train_ds, val_ds = random_split(ds, [train_size, val_size])
 
+	# data_splits = load_smiles_by_set(zinc_folder)
+	#
+	# print(len(data_splits["train"]["smiles"]))
+	# print(len(data_splits["val"]["smiles"]))
+	#
+	# train_ds = ZincDataset(data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer)
+	# val_ds = ZincDataset(data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer)
+	# test_ds = ZincDataset(data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer)
+	#
+	# train_dl = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=10)
+	# val_dl = DataLoader(val_ds, batch_size=2, shuffle=False, num_workers=10)
+
+
 	# for idx in range(len(val_ds)):
-	# 	if idx > 5:
+	# 	if idx > 15:
 	# 		break
 	# 	sample = val_ds[idx]
 	# 	# Decode input and label tokens for inspection:
@@ -74,13 +89,14 @@ if __name__ == "__main__":
 	logger = TensorBoardLogger("lightning_logs", name="pretrain_random_smiles_zinc")
 	csv_logger = CSVLogger("logs", name="pretrain_random_smiles_zinc")
 
+	d_model = 768
 	model = BART(
 		vocab_size=vocab_size,
 		norm_layer=nn.RMSNorm,
-		d_model=512,
-		n_heads=8,
+		d_model=d_model,
+		n_heads=12,
 		n_layers=6,
-		d_ff=2048,
+		d_ff=d_model * 4,
 		activation="swiglu",
 	)
 	# model.load_state_dict(torch.load("_pretrained_model.pt", weights_only=True))
@@ -110,6 +126,7 @@ if __name__ == "__main__":
 		# val_check_interval=500,
 		callbacks=[early_stop_callback, checkpoint_callback, timer],
 		logger=[csv_logger, logger],
+		precision="16-mixed",
 		gradient_clip_val=1.0,
 		limit_train_batches=0.005,
 		limit_val_batches=0.001,

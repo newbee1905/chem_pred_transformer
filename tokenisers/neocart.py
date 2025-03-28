@@ -28,7 +28,7 @@ class SMILESTokenizer(PreTrainedTokenizerFast):
 		eos_token: str = "</s>",
 		pad_token: str = "<pad>",
 		mask_token: str = "<mask>",
-		**kwargs
+		**kwargs,
 	):
 		if tokenizer_file is not None:
 			super().__init__(
@@ -106,15 +106,37 @@ class SMILESTokenizer(PreTrainedTokenizerFast):
 	def train_new(
 		cls,
 		files: List[str],
-		vocab_size: int = 1000,
-		min_frequency: int = 2,
+		vocab_size: int = 30000,
+		min_frequency: int = 2000,
 		special_tokens: Optional[List[str]] = None,
-		save_path: Optional[str] = None,  # Allow saving to a user-defined path
-		**kwargs
+		save_path: Optional[str] = None,
+		augment_factor: int = 1,
+		**kwargs,
 	) -> "SMILESTokenizer":
 		default_special_tokens = ["<s>", "</s>", "<unk>", "<pad>", "<mask>"]
 		if special_tokens:
 			default_special_tokens.extend(special_tokens)
+
+		smiles_list = []
+		for file in files:
+			with open(file, "r") as f:
+				for line in f:
+					smi = line.strip()
+					if smi:
+						smiles_list.append(smi)
+
+		if augment_factor > 0:
+			augmented = []
+			for smi in smiles_list:
+				augmented.append(smi)
+				try:
+					mol = Chem.MolFromSmiles(smi)
+					for _ in range(augment_factor):
+						rand_smi = Chem.MolToSmiles(mol, doRandom=True, canonical=False)
+						augmented.append(rand_smi)
+				except Exception as e:
+					continue
+			smiles_list = augmented
 
 		tokenizer = Tokenizer(BPE())
 		tokenizer.pre_tokenizer = pre_tokenizers.Split(
@@ -128,7 +150,7 @@ class SMILESTokenizer(PreTrainedTokenizerFast):
 			special_tokens=default_special_tokens
 		)
 
-		tokenizer.train(files, trainer)
+		tokenizer.train_from_iterator(smiles_list, trainer)
 		tokenizer.decoder = decoders.ByteLevel()
 
 		# Handle saving

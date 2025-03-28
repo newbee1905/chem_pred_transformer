@@ -11,6 +11,7 @@ dependencies = [
     "joblib>=1.4.2",
     "lightning>=2.5.0.post0",
     "lmdb>=1.6.2",
+    "matplotlib>=3.10.1",
     "pandas>=2.2.3",
     "pysmilesutils",
     "rdkit>=2024.9.6",
