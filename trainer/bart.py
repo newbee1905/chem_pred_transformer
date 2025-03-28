@@ -28,8 +28,7 @@ class BARTModel(pl.LightningModule):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
-		self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=tokenizer.pad_token_id)
-		# self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+		self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
 		# Track accuracy metrics
 		self.val_top1_acc = []
@@ -45,76 +44,60 @@ class BARTModel(pl.LightningModule):
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
 		return self.model(src, tgt, src_mask, tgt_mask)
 
-	def _calc_mask_loss(self, token_output: torch.Tensor, target: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
-		"""
-		Computes token-level loss over valid (non-pad and non-mask) tokens.
-		"""
-		# Use einops to flatten sequence and batch dims.
-		token_pred = rearrange(token_output, 's b v -> (s b) v').float()
-		flat_target = rearrange(target, 's b -> (s b)')
-
-		loss = self.loss_fn(
-			token_pred,
-			flat_target,
-		)
-
-		loss = rearrange(loss, '(s b) -> b s', s=target.size(0))
-
-		return loss[valid_mask].sum() / valid_mask.sum().float()
-
-	def _calc_loss(self, tgt: torch.Tensor, logits: torch.Tensor, noise_mask: torch.Tensor) -> torch.Tensor:
+	def _calc_loss(self, tgt: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
 		# Remove the first token (BOS) from both target and logits.
 		token_output = rearrange(logits[:, 1:, :], 'b s v -> s b v')
 		target = rearrange(tgt[:, 1:], 'b s -> s b')
 
-		return self._calc_mask_loss(token_output, target, noise_mask[:, 1:])
+		token_output = token_output.reshape(-1, token_output.size(-1)).float()
+		target = target.reshape(-1)
+		loss = self.loss_fn(token_output, target)
 
-	def _calc_token_acc(self, tgt: torch.Tensor, logits: torch.Tensor, noise_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+		return loss
+
+	def _calc_token_acc(self, tgt: torch.Tensor, logits: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
 		"""
-		Computes token-level accuracy for top-1 and top-5 predictions.
+		Compute token-level top-1 and top-5 accuracy over the entire sequence,
+		ignoring pad tokens.
 		"""
+		pad_id = self.tokenizer.pad_token_id
 
 		_, pred_ids = torch.max(logits, dim=-1)
-		pred_ids_rb = rearrange(pred_ids, 'b s -> s b')
-		tgt_rb = rearrange(tgt, 'b s -> s b')
-		valid_mask_rb = rearrange(noise_mask, 'b s -> s b')
-		correct_top1 = (pred_ids_rb == tgt_rb) & valid_mask_rb
-		total_valid = valid_mask_rb.sum().float()
-		top1_acc = correct_top1.sum().float() / total_valid
-		
+		valid_mask = (tgt != pad_id)
+
+		correct_top1 = (pred_ids == tgt) & valid_mask
+		top1_acc = correct_top1.sum().float() / valid_mask.sum().float()
+
 		_, top5_ids = torch.topk(logits.float(), k=5, dim=-1)
 		tgt_expanded = tgt.unsqueeze(-1).expand_as(top5_ids)
-		correct_top5 = torch.any(top5_ids == tgt_expanded, dim=-1)
-		top5_correct = correct_top5 & noise_mask  
-		top5_acc = top5_correct.sum().float() / noise_mask.sum().float()
-		
+		correct_top5 = (top5_ids == tgt_expanded).any(dim=-1) & valid_mask
+		top5_acc = correct_top5.sum().float() / valid_mask.sum().float()
+
 		return top1_acc, top5_acc
 
 	def training_step(self, batch, batch_idx):
 		src, tgt = batch["input_ids"], batch["labels"]
-		noise_mask = batch["noise_mask"]
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 		target = tgt[:, 1:]
 
 		logits = self(src, decoder_input)
-		loss = self._calc_loss(tgt, logits, noise_mask)
+		loss = self._calc_loss(tgt, logits)
 
 		self.log("train_loss", loss, prog_bar=True, sync_dist=True)
 		return loss
 
 	def validation_step(self, batch, batch_idx):
 		src, tgt = batch["input_ids"], batch["labels"]
-		noise_mask = batch["noise_mask"]
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 
 		logits = self(src, decoder_input)
-		loss = self._calc_loss(tgt, logits, noise_mask)
+		loss = self._calc_loss(tgt, logits)
 
-		top1_acc, top5_acc = self._calc_token_acc(tgt, logits, noise_mask)
+		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
 
 		self.val_top1_acc.append(top1_acc)
 		self.val_top5_acc.append(top5_acc)
@@ -155,15 +138,14 @@ class BARTModel(pl.LightningModule):
 
 	def test_step(self, batch, batch_idx):
 		src, tgt = batch["input_ids"], batch["labels"]
-		noise_mask = batch["noise_mask"]
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 
 		logits = self(src, decoder_input)
-		loss = self._calc_loss(tgt, logits, noise_mask)
+		loss = self._calc_loss(tgt, logits)
 
-		top1_acc, top5_acc = self._calc_token_acc(tgt, logits, noise_mask)
+		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
 
 		self.val_top1_acc.append(top1_acc)
 		self.val_top5_acc.append(top5_acc)
@@ -205,11 +187,19 @@ class BARTModel(pl.LightningModule):
 
 	def configure_optimizers(self):
 		if self.mode == "pretrain":
-			optimizer = torch.optim.AdamW(self.parameters(), lr=1.0)
-			d_model = 512
+			optimizer = torch.optim.AdamW(self.parameters(), lr=1.0, betas=(0.9, 0.999))
+			d_model = self.model.d_model
 			warmup_steps = 8000
 			lr_lambda = lambda step: (d_model ** -0.5) * min((step + 1) ** (-0.5), (step + 1) * (warmup_steps ** -1.5))
 			scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
-			return torch.optim.AdamW(self.parameters(), lr=5e-5)
+			optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999))
+			total_steps = self.trainer.estimated_stepping_batches
+			scheduler = torch.optim.lr_scheduler.OneCycleLR(
+				optimizer,
+				max_lr=5e-5,
+				total_steps=total_steps,
+				anneal_strategy='linear'
+			)
+			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
