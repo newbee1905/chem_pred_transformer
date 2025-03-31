@@ -23,6 +23,8 @@ from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
 
+from transformers import get_cosine_schedule_with_warmup
+
 class BARTModel(pl.LightningModule):
 	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 512, mode: str = "pretrain"):
 		super().__init__()
@@ -195,11 +197,9 @@ class BARTModel(pl.LightningModule):
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
 			optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999))
-			total_steps = self.trainer.estimated_stepping_batches
-			scheduler = torch.optim.lr_scheduler.OneCycleLR(
+			scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
 				optimizer,
-				max_lr=5e-5,
-				total_steps=total_steps,
-				anneal_strategy='linear'
+				T_max=10,
+				eta_min=0
 			)
-			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+			return [optimizer], [scheduler]
