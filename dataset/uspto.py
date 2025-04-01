@@ -90,6 +90,32 @@ class USPTO50KDataset(Dataset):
 		}
 
 	def __getitem__(self, idx):
+		reaction = self.reactions[idx]
+		parts = reaction.split(">")
+		if len(parts) == 3:
+			reactants_raw = parts[0].strip()
+			products_raw	= parts[2].strip()
+		else:
+			reactants_raw = reaction.strip()
+			products_raw	= reaction.strip()
+
+		inp = self.get_smi_data(reactants_raw)
+		label = self.get_smi_data(products_raw)
+
+		return {
+			"input_ids": inp["input_ids"].squeeze(0),
+			"attention_mask": inp["attention_mask"].squeeze(0),
+			"labels": label["input_ids"].squeeze(0),
+		}
+
+class USPTO50KRetrosynthesisDataset(Dataset):
+	def __init__(self, reactions: List[str], tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
+		super().__init__(reactions, tokenizer, max_length, tokenizer_type)
+
+	def __len__(self):
+		return len(self.reactions) * 2
+
+	def __getitem__(self, idx):
 		reaction = self.reactions[idx // 2]
 		parts = reaction.split(">")
 		if len(parts) == 3:
@@ -101,6 +127,9 @@ class USPTO50KDataset(Dataset):
 
 		inp = self.get_smi_data(reactants_raw)
 		label = self.get_smi_data(products_raw)
+
+		if i % 2 == 1:
+			inp, label = label, inp
 
 		return {
 			"input_ids": inp["input_ids"].squeeze(0),
