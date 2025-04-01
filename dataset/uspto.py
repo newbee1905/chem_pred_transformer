@@ -53,7 +53,10 @@ class USPTO50KDataset(Dataset):
 
 	def get_smi_data(self, org_smi):
 		mol = Chem.MolFromSmiles(org_smi)
-		smi = Chem.MolToSmiles(mol, canonical=True)
+		if mol is None:
+			smi = org_smi
+		else:
+			smi = Chem.MolToSmiles(mol, canonical=True)
 		
 		if self.tokenizer.bos_token is not None:
 			if not smi.startswith(self.tokenizer.bos_token):
