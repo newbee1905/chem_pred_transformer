@@ -66,7 +66,8 @@ class MultiHeadAttention(nn.Module):
 	def forward(
 		self, 
   	Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, freqs_cis: torch.Tensor,
-		mask: Optional[torch.Tensor] = None, is_causal: bool = False
+		mask: Optional[torch.Tensor] = None, is_causal: bool = False,
+		cache: Optional[dict] = None,
 	):
 		Q = self.split_heads(self.q_proj(Q))
 		K = self.split_heads(self.k_proj(K))
@@ -74,6 +75,13 @@ class MultiHeadAttention(nn.Module):
 
 		Q, K = apply_rotary_emb(Q, K, freqs_cis=freqs_cis)
 		
+		# if cache is not None:
+		# 	if 'k' in cache and 'v' in cache:
+		# 		K = torch.cat([cache['k'], K], dim=1)
+		# 		V = torch.cat([cache['v'], V], dim=1)
+		# 	cache['k'] = K
+		# 	cache['v'] = V
+		#
 		attn_output = self.scaled_dot_product_attention(Q, K, V, mask, is_causal=is_causal)
 		output = self.out_proj(self.combine_heads(attn_output))
 
@@ -143,9 +151,10 @@ class DecoderLayer(nn.Module):
 	def forward(
 		self, tgt: torch.Tensor, memory: torch.Tensor, freqs_cis: torch.Tensor,
 		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
+		cache: Optional[dict] = None,
 	):
 		norm_tgt = self.self_attn_norm(tgt)
-		self_attn_out = self.self_attn(norm_tgt, norm_tgt, norm_tgt, freqs_cis, tgt_mask, is_causal=True)
+		self_attn_out = self.self_attn(norm_tgt, norm_tgt, norm_tgt, freqs_cis, tgt_mask, is_causal=True, cache=cache)
 		self_attn_out = self.self_attn_dropout(self_attn_out)
 		if self.self_attn_layer_scale is not None:
 			tgt = tgt + self.self_attn_layer_scale * self_attn_out
@@ -169,6 +178,42 @@ class DecoderLayer(nn.Module):
 			tgt = tgt + ff_out
 
 		return tgt
+
+class GPTDecoderLayer(nn.Module):
+	def __init__(
+		self, d_model: int, n_heads: int, d_ff: int = 3072,
+		dropout: float = 0.2, max_seq_len: int = 1024, use_layerscale: bool = True,
+		norm_layer=nn.LayerNorm, activation="swiglu",
+	):
+		super().__init__()
+		self.self_attn = MultiHeadAttention(d_model, n_heads, dropout)
+		self.self_attn_norm = norm_layer(d_model)
+		self.self_attn_dropout = nn.Dropout(dropout)
+		self.self_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
+
+		self.ff_norm = norm_layer(d_model)
+		self.ff = FeedForward(d_model, d_ff, dropout, activation)
+		self.ff_dropout = nn.Dropout(dropout)
+		self.ff_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
+			
+	def forward(self, src: torch.Tensor, freqs_cis: torch.Tensor, src_mask: Optional[torch.Tensor] = None, cache: Optional[dict] = None):
+		norm_src = self.self_attn_norm(src)
+		attn_out = self.self_attn(norm_src, norm_src, norm_src, freqs_cis, src_mask, is_causal=True, cache=cache)
+		attn_out = self.self_attn_dropout(attn_out)
+		if self.self_attn_layer_scale is not None:
+			src = src + self.self_attn_layer_scale * attn_out
+		else:
+			src = src + attn_out
+
+		norm_src = self.ff_norm(src)
+		ff_out = self.ff(norm_src)
+		ff_out = self.ff_dropout(ff_out)
+		if self.ff_layer_scale is not None:
+			src = src + self.ff_layer_scale * ff_out
+		else:
+			src = src + ff_out
+
+		return src
 
 class PreNormEncoderLayer(nn.TransformerEncoderLayer):
 	def forward(self, src, src_mask=None, src_key_padding_mask=None, is_causal=False):

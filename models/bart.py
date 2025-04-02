@@ -63,6 +63,22 @@ class BART(nn.Module):
 
 		return x
 
+	def decode_incremental(
+		self, new_token: torch.Tensor, memory: torch.Tensor,
+		tgt_mask: Optional[torch.Tensor] = None,
+		memory_mask: Optional[torch.Tensor] = None,
+		caches: Optional[list] = None
+	) -> (torch.Tensor, list):
+		x = self.emb(new_token)
+		new_caches = []
+
+		for i, layer in enumerate(self.dec_layers):
+			layer_cache = None if caches is None else caches[i]
+			x = layer(x, memory, self.freqs_cis, tgt_mask, memory_mask, cache=layer_cache)
+			new_caches.append(layer_cache)
+
+		return x, new_caches
+
 	def forward(self, src: torch.Tensor, tgt: torch.Tensor, src_mask: Optional[torch.Tensor] = None, tgt_mask: Optional[torch.Tensor] = None):
 		_, seq_len = src.shape
 
@@ -85,10 +101,14 @@ class BART(nn.Module):
 		batch_size, src_seq_len = src.size()
 		memory = self.encode(src, src_mask)
 
+		caches = [{} for _ in self.dec_layers]
 		generated = torch.full((batch_size, 1), bos_token_id, dtype=torch.long, device=device)
 		done = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
 		for i in range(max_length):
+			# new_token = generated[:, -1:].clone()
+			# dec_out, caches = self.decode_incremental(new_token, memory, caches)
+			# logits = self.fc_out(dec_out.squeeze(1))
 			dec_out = self.decode(generated, memory)
 			logits = self.fc_out(dec_out[:, -1, :])
 
