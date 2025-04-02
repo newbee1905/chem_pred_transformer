@@ -1,0 +1,5 @@
+type: "uspto_sep"
+path: "data/uspto_sep.pickle"
+_target_: dataset.uspto.USPTOChemformerDataset
+max_length: 256
+split_mode: "predefined"

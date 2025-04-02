@@ -11,6 +11,7 @@ from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset
 from dataset.zinc import ZincDataset, load_smiles_by_set
 
 import importlib
+import pickle
 import lightning.pytorch as pl
 from utils import set_seed, filter_none_kwargs
 
@@ -38,12 +39,28 @@ def my_app(cfg : DictConfig) -> None:
 	else:
 		raise ValueError(f"Tokenizer {cfg.tokenizer.type} is not supported")
 
-	if cfg.dataset.type == "zinc":
-		del cfg.dataset.type
-		data_splits = load_smiles_by_set(cfg.dataset.path)
-		train_ds = instantiate(cfg.dataset, data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-		val_ds = instantiate(cfg.dataset, data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-		test_ds = instantiate(cfg.dataset, data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+	if cfg.dataset.split_mode == "predefined":
+		del cfg.dataset.split_mode
+
+		if cfg.dataset.type == "zinc":
+			data_splits = load_smiles_by_set(cfg.dataset.path)
+
+			del cfg.dataset.type
+			del cfg.dataset.path
+
+			train_ds = instantiate(cfg.dataset, data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			val_ds = instantiate(cfg.dataset, data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		else:
+			with open(cfg.dataset.path, "rb") as f:
+				data_splits = pickle.load(f)
+
+			del cfg.dataset.type
+			del cfg.dataset.path
+
+			train_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "train"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			val_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "valid"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "test"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 
 		max_length = train_ds.max_length
 

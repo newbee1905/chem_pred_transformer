@@ -1,0 +1,5 @@
+type: "uspto_mixed"
+path: "data/uspto_mixed.pickle"
+_target_: dataset.uspto.USPTOChemformerDataset
+max_length: 256
+split_mode: "predefined"

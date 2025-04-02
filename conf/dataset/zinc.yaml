@@ -1,6 +1,7 @@
 type: "zinc"
 path: "data/zinc"
-_target_: dataset.chembl.ChemBL35FilteredDataset
+_target_: dataset.zinc.ZincDataset
 max_length: 256
 noise_prob: 0.2
 span_lambda: 2
+split_mode: "predefined"

@@ -3,13 +3,14 @@ defaults:
   - tokenizer: hf
   - model: bart
   - module: bart
+  - _self_
 
 seed: 24
 train_split: 0.9
 
 batch_size: 2
 num_workers: 6
-ckpt_path: "train_checkpoints-server/best-checkpoint-filtered-chembl-v1.ckpt"
+# ckpt_path: "train_checkpoints-server/best-checkpoint-filtered-chembl-v1.ckpt"
 pth_path: ""
 
 callbacks:
