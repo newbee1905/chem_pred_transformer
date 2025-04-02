@@ -25,8 +25,7 @@ from metrics import SMILESEvaluationMetric
 
 from transformers import get_cosine_schedule_with_warmup
 
-class BARTModel(pl.LightningModule):
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256, mode: str = "pretrain"):
+class BARTModel(pl.LightningModule): def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256, mode: str = "pretrain"):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
@@ -108,35 +107,11 @@ class BARTModel(pl.LightningModule):
 		self.log("v_top1", top1_acc, prog_bar=True, sync_dist=True)
 		self.log("v_top5", top5_acc, prog_bar=True, sync_dist=True)
 
-		generated_tokens = self.model.generate(
-			src.to(self.device),
-			self.max_length,
-			self.tokenizer.bos_token_id,
-			self.tokenizer.eos_token_id,
-		)
-		generated_tokens = generated_tokens.cpu()
-
-		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-		# print(gen_smiles_list, ref_smiles_list)
-
-		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
-
-		torch.cuda.empty_cache()
-
 		return loss
 
 	def on_validation_epoch_end(self):
-		scores = self.smiles_metric.compute()
+		pass
 
-		self.log_dict({
-			"v_valid": scores["valid_smiles_ratio"],
-			"v_tanimoto": scores["avg_tanimoto"],
-			"v_unique": scores["unique_ratio"],
-			"v_dup_ratio": scores["duplicate_ratio"],
-		}, prog_bar=True, sync_dist=True)
-
-		self.smiles_metric.reset()
 
 	def test_step(self, batch, batch_idx):
 		src, tgt = batch["input_ids"], batch["labels"]
@@ -166,9 +141,13 @@ class BARTModel(pl.LightningModule):
 
 		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-		print("--------------------------")
-		print(gen_smiles_list)
-		print(ref_smiles_list)
+		# print("--------------------------")
+		# print(gen_smiles_list)
+		# print(ref_smiles_list)
+
+		smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
+		smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+		self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
 
 		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 		torch.cuda.empty_cache()
