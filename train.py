@@ -7,12 +7,13 @@ from tqdm import tqdm
 import pandas as pd
 
 from trainer.bart import BARTModel
-# from trainer.vae import BARTVAEModel
+from trainer.gpt import GPTModel
 from models.bart import BART
+from models.gpt import GPT
 from models.chemformer import Chemformer
 from models.utils import DyT
 from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
-from dataset.uspto import USPTO50KDataset
+from dataset.uspto import USPTODataset
 from dataset.zinc import ZincDataset, load_smiles_by_set
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
@@ -41,8 +42,6 @@ if __name__ == "__main__":
 	tokenizer_dir = "trained_tokenizer"
 	uspto_csv = "USPTO_FULL.csv"
 
-	uspto_df = pd.read_csv(uspto_csv)
-
 	tokenizer = SMILESTokenizer.from_pretrained(tokenizer_dir)
 	if tokenizer.mask_token is None:
 		tokenizer.add_special_tokens({"mask_token": "<mask>"})
@@ -52,8 +51,8 @@ if __name__ == "__main__":
 	# tokenizer = ChemformerTokenizer(filename="bart_vocab.json")
 	# vocab_size = len(tokenizer)
 
-	# ds = ChemBL35FilteredDataset(smiles_joblib_file, tokenizer, max_length=256, noise_prob=0.2, span_lambda=2, tokenizer_type="hf")
-	ds = USPTO50KDataset(uspto_df["reactions"], tokenizer, max_length=256, tokenizer_type="hf")
+	ds = ChemBL35FilteredDataset(smiles_joblib_file, tokenizer, max_length=256, noise_prob=0.0, span_lambda=2, tokenizer_type="hf")
+	# ds = USPTODataset(uspto_csv, tokenizer, max_length=256, tokenizer_type="hf")
 	train_size = int(0.9 * len(ds))
 	val_size = len(ds) - train_size
 	train_ds, val_ds = random_split(ds, [train_size, val_size])
@@ -70,23 +69,6 @@ if __name__ == "__main__":
 	# train_dl = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=10)
 	# val_dl = DataLoader(val_ds, batch_size=2, shuffle=False, num_workers=10)
 
-
-	for idx in range(len(val_ds)):
-		if idx > 15:
-			break
-		sample = val_ds[idx]
-		# Decode input and label tokens for inspection:
-		input_decoded = tokenizer.decode(sample["input_ids"].tolist(), skip_special_tokens=False)
-		label_decoded = tokenizer.decode(sample["labels"].tolist(), skip_special_tokens=False)
-
-		print(f"Example {idx+1}:")
-		print("Input IDs:", sample["input_ids"])
-		print("Noise Mask:", sample.get("noise_mask", "Not Provided"))
-		print("Decoded Input:", input_decoded)
-		print("Labels:", sample["labels"])
-		print("Decoded Labels:", label_decoded)
-		print("-" * 50)
-	
 	# train_dl = DataLoader(train_ds, batch_size=64, shuffle=True, num_workers=4)
 	# val_dl = DataLoader(val_ds, batch_size=64, shuffle=False, num_workers=4)
 	train_dl = DataLoader(train_ds, batch_size=2, shuffle=True, num_workers=4)
@@ -96,7 +78,7 @@ if __name__ == "__main__":
 	csv_logger = CSVLogger("logs", name="pretrain_random_smiles_zinc")
 
 	d_model = 768
-	model = BART(
+	bart_model = BART(
 		vocab_size=vocab_size,
 		norm_layer=nn.RMSNorm,
 		d_model=d_model,
@@ -105,9 +87,21 @@ if __name__ == "__main__":
 		d_ff=d_model * 4,
 		activation="swiglu",
 	)
-	# model.load_state_dict(torch.load("_pretrained_model.pt", weights_only=True))
-	# print(model)
-	module = BARTModel(model, tokenizer)
+	bart_model.load_state_dict(torch.load("best_ckpt_pretrain_bart_filtered_chembl.pt", weights_only=True))
+	d_model = 768
+	model = GPT(
+		vocab_size=vocab_size,
+		norm_layer=nn.RMSNorm,
+		d_model=d_model,
+		n_heads=16,
+		n_layers=12,
+		d_ff=d_model * 4,
+		activation="swiglu",
+	)
+	print(model)
+	# model.load_from_bart(bart_model)
+	# module = GPTModel(model, tokenizer, mode="pretrain-bart")
+	module = GPTModel(model, tokenizer, mode="pretrain")
 
 	early_stop_callback = EarlyStopping(
 		monitor="val_loss",
@@ -135,9 +129,10 @@ if __name__ == "__main__":
 		logger=[csv_logger, logger],
 		precision="16-mixed",
 		gradient_clip_val=1.0,
+		limit_train_batches=0.01,
+		limit_val_batches=0.01,
 	)
 
-	# trainer.fit(module, train_dl, val_dl, ckpt_path="train_checkpoints/best-checkpoint-v1.ckpt")
 	# trainer.fit(module, dm)
 	trainer.fit(module, train_dl, val_dl)
-	torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")
+	# torch.save(module.model.state_dict(), "fast_best_ckpt_bart.pth")
