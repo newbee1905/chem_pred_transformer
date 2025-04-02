@@ -142,9 +142,9 @@ class BARTModel(pl.LightningModule):
 
 		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-		# print("--------------------------")
-		# print(gen_smiles_list)
-		# print(ref_smiles_list)
+		print("--------------------------")
+		print(gen_smiles_list)
+		print(ref_smiles_list)
 
 		smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 		smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
@@ -163,6 +163,7 @@ class BARTModel(pl.LightningModule):
 			"t_tanimoto": scores["avg_tanimoto"],
 			"t_unique": scores["unique_ratio"],
 			"t_dup_ratio": scores["duplicate_ratio"],
+			"t_dup_count": scores["duplicate_count"],
 		}, prog_bar=True, sync_dist=True)
 
 		self.smiles_metric.reset()

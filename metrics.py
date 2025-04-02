@@ -31,11 +31,10 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 				fp_target = self.mfpgen.GetFingerprint(mol_target)
 				tanimoto_sum += DataStructs.TanimotoSimilarity(fp_pred, fp_target)
 
-				pred_tensor = torch.tensor([hash(pred)], dtype=torch.long, device=device)
-				if pred_tensor in self.unique_smiles_set:
+				if pred in self.unique_smiles_set:
 					duplicates += 1
 				else:
-					self.unique_smiles_set.add(pred_tensor)
+					self.unique_smiles_set.add(pred)
 
 				valid_count += 1
 
@@ -57,6 +56,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 			"avg_tanimoto": avg_tanimoto,
 			"unique_ratio": unique_ratio,
 			"duplicate_ratio": duplicate_ratio,
+			"duplicate_count": self.duplicates_count.to(torch.float16),
 		}
 
 	def reset(self):
