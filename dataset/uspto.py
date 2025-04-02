@@ -162,7 +162,7 @@ class USPTOChemformerDataset(USPTODataset):
 		return len(self.uspto_df)
 
 	def __getitem__(self, idx):
-		reactants_mol, products_mol = self.uspto_df.loc[1, ["reactants_mol", "products_mol"]]
+		reactants_mol, products_mol = self.uspto_df.loc[idx, ["reactants_mol", "products_mol"]]
 
 		reactants_smi = Chem.MolToSmiles(reactants_mol, canonical=True)
 		products_smi = Chem.MolToSmiles(products_mol, canonical=True)
