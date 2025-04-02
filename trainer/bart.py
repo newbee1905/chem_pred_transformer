@@ -26,7 +26,7 @@ from metrics import SMILESEvaluationMetric
 from transformers import get_cosine_schedule_with_warmup
 
 class BARTModel(pl.LightningModule):
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 512, mode: str = "pretrain"):
+	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256, mode: str = "pretrain"):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer

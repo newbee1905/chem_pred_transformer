@@ -1,170 +1,109 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import hydra
+from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf
 
-from einops import rearrange, repeat
+from tokenisers.neocart import SMILESTokenizer
+from tokenisers.chemformer import ChemformerTokenizer
 
-class DyT(nn.Module):
-	def __init__(self, C, init_α):
-		super().__init__()
-		self.alpha = nn.Parameter(ones(1) * init_alpha)
-		self.gamma = nn.Parameter(ones(C))
-		self.beta = nn.Parameter(zeros(C))
+from torch.utils.data import DataLoader, random_split
+from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
+from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset
+from dataset.zinc import ZincDataset, load_smiles_by_set
 
-	def forward(self, x):
-		x = tanh(self.alpha * x)
+import importlib
+import lightning.pytorch as pl
+from utils import set_seed, filter_none_kwargs
 
-		return self.gamma * x + self.beta
+def resolve_py_path(path: str):
+	module_name, class_name = path.rsplit(".", 1)
+	module = importlib.import_module(module_name)
+	return getattr(module, class_name)
 
-class FeedForward(nn.Module):
-	def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1):
-		super().__init__()
+@hydra.main(version_base=None, config_path="conf", config_name="config")
+def my_app(cfg : DictConfig) -> None:
+	print(OmegaConf.to_yaml(cfg))
 
-		# default scaling down by 2/3 since normal 
-		# d_ff is 4xd_model
-		# Should be ~2.667 scalling now
-		# based on Llama SwiGLU FeedForward
-		# https://github.com/meta-llama/llama
-		d_ff = int(2 * d_ff // 3)
+	set_seed(cfg.seed)
 
-		# TODO: checking out parallel Linear from llama
-		self.fc_in = nn.Linear(d_model, d_ff * 2) # can be column parallel
-		self.fc_out = nn.Linear(d_ff, d_model) # can be row parallel
+	if cfg.tokenizer.type == "hf":
+		tokenizer = SMILESTokenizer.from_pretrained(cfg.tokenizer.path)
 
-		self.dropout = nn.Dropout(dropout)
+		if tokenizer.mask_token is None:
+			tokenizer.add_special_tokens({"mask_token": "<mask>"})
 
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		x_proj = self.fc_in(x)
-		gate, x_proj = x_proj.chunk(2, dim=-1)
+		vocab_size = tokenizer.vocab_size
+	elif cfg.tokenizer.type == "chemformer":
+		tokenizer = ChemformerTokenizer(filename=cfg.tokenizer.path)
+		vocab_size = len(tokenizer)
+	else:
+		raise ValueError(f"Tokenizer {cfg.tokenizer.type} is not supported")
 
-		x = x_proj * F.silu(gate)
-		x = self.fc_out(self.dropout(x))
+	if cfg.dataset.type == "zinc":
+		del cfg.dataset.type
+		data_splits = load_smiles_by_set(cfg.dataset.path)
+		train_ds = instantiate(cfg.dataset, data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		val_ds = instantiate(cfg.dataset, data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		test_ds = instantiate(cfg.dataset, data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 
-		return x
+		max_length = train_ds.max_length
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-	freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-	t = torch.arange(end, device=freqs.device)  # type: ignore
-	freqs = torch.outer(t, freqs).float()  # type: ignore
-	freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-	return freqs_cis
-
-def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
-	ndim = x.ndim
-	assert 0 <= 1 < ndim
-	assert freqs_cis.shape == (x.shape[1], x.shape[-1])
-
-	shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-
-	return freqs_cis.view(*shape)
-
-def apply_rotary_emb(
-	xq: torch.Tensor,
-	xk: torch.Tensor,
-	freqs_cis: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-	xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-	xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-	freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-
-	xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-	xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
-
-	return xq_out.type_as(xq), xk_out.type_as(xk)
-
-class Attention(nn.Module):
-	def __init__(self, args: ModelArgs):
-		super().__init__()
-		self.n_kv_heads = args.n_heads if args.n_kv_heads is None else args.n_kv_heads
-		model_parallel_size = fs_init.get_model_parallel_world_size()
-		self.n_local_heads = args.n_heads // model_parallel_size
-		self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
-		self.n_rep = self.n_local_heads // self.n_local_kv_heads
-		self.head_dim = args.dim // args.n_heads
-
-		self.wq = ColumnParallelLinear(
-			args.dim,
-			args.n_heads * self.head_dim,
-			bias=False,
-			gather_output=False,
-			init_method=lambda x: x,
+		test_dl = DataLoader(
+			test_ds,
+			batch_size=cfg.batch_size,
+			shuffle=False,
+			num_workers=cfg.num_workers
 		)
-		self.wk = ColumnParallelLinear(
-			args.dim,
-			self.n_kv_heads * self.head_dim,
-			bias=False,
-			gather_output=False,
-			init_method=lambda x: x,
-		)
-		self.wv = ColumnParallelLinear(
-			args.dim,
-			self.n_kv_heads * self.head_dim,
-			bias=False,
-			gather_output=False,
-			init_method=lambda x: x,
-		)
-		self.wo = RowParallelLinear(
-			args.n_heads * self.head_dim,
-			args.dim,
-			bias=False,
-			input_is_parallel=True,
-			init_method=lambda x: x,
+	else:
+		del cfg.dataset.type
+		ds = instantiate(cfg.dataset, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		train_size = int(cfg.train_split * len(ds))
+		val_size = len(ds) - train_size
+		train_ds, val_ds = random_split(ds, [train_size, val_size])
+
+		max_length = ds.max_length
+
+		test_dl = DataLoader(
+			val_ds,
+			batch_size=cfg.batch_size,
+			shuffle=False,
+			num_workers=cfg.num_workers
 		)
 
-		self.cache_k = torch.zeros(
-			(
-				args.max_batch_size,
-				args.max_seq_len,
-				self.n_local_kv_heads,
-				self.head_dim,
-			)
-		).cuda()
-		self.cache_v = torch.zeros(
-			(
-				args.max_batch_size,
-				args.max_seq_len,
-				self.n_local_kv_heads,
-				self.head_dim,
-			)
-		).cuda()
+	train_dl = DataLoader(
+		train_ds,
+		batch_size=cfg.batch_size,
+		shuffle=True,
+		num_workers=cfg.num_workers
+	)
+	val_dl = DataLoader(
+		val_ds,
+		batch_size=cfg.batch_size,
+		shuffle=False,
+		num_workers=cfg.num_workers
+	)
 
-	def forward(
-		self,
-		x: torch.Tensor,
-		start_pos: int,
-		freqs_cis: torch.Tensor,
-		mask: Optional[torch.Tensor],
-	):
-		bsz, seqlen, _ = x.shape
-		xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+	model = instantiate(cfg.model, vocab_size=vocab_size)
+	if "pretrained_state_dict" in cfg:
+		model.load_state_dict(torch.load(cfg.pretrained_state_dict))
+	print(model)
+	module = instantiate(cfg.module, model, tokenizer, max_length=max_length, mode=cfg.task_type)
+	print(module)
 
-		xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-		xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-		xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+	callbacks = []
+	if "callbacks" in cfg:
+		for cb_cfg in cfg.callbacks:
+			callbacks.append(instantiate(cb_cfg))
+	
+	trainer = pl.Trainer(**cfg.trainer, callbacks=callbacks)
 
-		xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+	trainer_kwargs = filter_none_kwargs(ckpt_path=cfg.get("ckpt_path"))
 
-		self.cache_k = self.cache_k.to(xq)
-		self.cache_v = self.cache_v.to(xq)
+	if cfg.task == "fit":
+		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
+	else:
+		trainer.test(module, test_dl, **trainer_kwargs)
 
-		self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
-		self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
 
-		keys = self.cache_k[:bsz, : start_pos + seqlen]
-		values = self.cache_v[:bsz, : start_pos + seqlen]
-
-		# repeat k/v heads if n_kv_heads < n_heads
-		keys = repeat_kv(keys, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-		values = repeat_kv(values, self.n_rep)  # (bs, cache_len + seqlen, n_local_heads, head_dim)
-
-		xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-		keys = keys.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
-		values = values.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
-		scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-		if mask is not None:
-			scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
-		scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-		output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
-		output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-		return self.wo(output)
-
+if __name__ == "__main__":
+	OmegaConf.register_new_resolver("py", resolve_py_path)
+	my_app()

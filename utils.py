@@ -19,3 +19,6 @@ def set_seed(seed: int = 24) -> None:
   if torch.cuda.is_available():
     torch.cuda.manual_seed_all(seed)
   os.environ['PYTHONHASHSEED'] = str(seed)
+
+def filter_none_kwargs(**kwargs):
+	return {k: v for k, v in kwargs.items() if v is not None}

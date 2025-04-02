@@ -1,3 +1,4 @@
+import pandas as pd
 from rdkit import Chem
 
 import torch
@@ -7,10 +8,11 @@ from transformers import PreTrainedTokenizerFast
 import logging
 from typing import List
 
-class USPTO50KDataset(Dataset):
-	def __init__(self, reactions: List[str], tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
-		# Expect reaction SMILES in the X field, formatted as "reactants>reagents>products".
-		self.reactions = reactions
+class USPTODataset(Dataset):
+	def __init__(self, uspto_csv_file: str, tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
+		uspto_df = pd.read_csv(uspto_csv_file)
+
+		self.reactions = uspto_df["reactions"]
 		self.tokenizer = tokenizer
 		self.max_length = max_length
 
@@ -108,9 +110,9 @@ class USPTO50KDataset(Dataset):
 			"labels": label["input_ids"].squeeze(0),
 		}
 
-class USPTO50KRetrosynthesisDataset(Dataset):
-	def __init__(self, reactions: List[str], tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
-		super().__init__(reactions, tokenizer, max_length, tokenizer_type)
+class USPTORetrosynthesisDataset(Dataset):
+	def __init__(self, uspto_csv_file: str, tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
+		super().__init__(uspto_csv_file, tokenizer, max_length, tokenizer_type)
 
 	def __len__(self):
 		return len(self.reactions) * 2

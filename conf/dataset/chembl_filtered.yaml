@@ -1,0 +1,6 @@
+type: "chembl_filtered"
+_target_: dataset.chembl.ChemBL35FilteredDataset
+smiles_joblib_file: "filtered_chembl_smiles.joblib"
+max_length: 256
+noise_prob: 0.2
+span_lambda: 2

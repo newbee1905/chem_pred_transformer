@@ -1,0 +1,47 @@
+defaults:
+  - dataset: uspto
+  - tokenizer: hf
+  - model: bart
+  - module: bart
+
+seed: 24
+train_split: 0.9
+
+batch_size: 2
+num_workers: 6
+ckpt_path: "train_checkpoints-server/best-checkpoint-filtered-chembl-v1.ckpt"
+pth_path: ""
+
+callbacks:
+  - _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: "val_loss"
+    patience: 5
+    verbose: true
+    min_delta: 0.001
+    mode: "min"
+
+  - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    monitor: "val_loss"
+    dirpath: "train_checkpoints"
+    filename: "best-checkpoint"
+    save_top_k: 2
+    mode: "min"
+
+  - _target_: lightning.pytorch.callbacks.Timer
+    duration: "00:20:00:00"
+
+# pretrained_state_dict: "chemformer_small_2.pth"
+
+trainer:
+  max_epochs: 50
+  # max_steps: 1000000
+  precision: "16-mixed"
+  gradient_clip_val: 1.0
+  # log_every_n_steps: 50
+  # accumulate_grad_batches: 1
+  # limit_train_batches: 0.0001
+  # limit_val_batches: 0.0001
+  limit_test_batches: 0.0001
+
+task: fit
+task_type: pretrain

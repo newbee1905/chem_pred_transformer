@@ -1,0 +1,6 @@
+type: "chembl"
+_target_: dataset.chembl.ChemBL35Dataset
+smiles_file: "chembl_35.smi"
+max_length: 256
+noise_prob: 0.2
+span_lambda: 2

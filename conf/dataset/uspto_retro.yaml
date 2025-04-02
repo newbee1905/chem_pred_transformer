@@ -1,0 +1,4 @@
+dataset_type: "uspto_retro"
+_target_: dataset.uspto.USPTORetrosynthesisDataset
+path: "USPTO_FULL.csv"
+max_length: 256
