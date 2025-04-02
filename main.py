@@ -98,12 +98,16 @@ def my_app(cfg : DictConfig) -> None:
 
 	trainer_kwargs = filter_none_kwargs(ckpt_path=cfg.get("ckpt_path"))
 
-	if cfg.task == "fit":
-		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
-	else:
+	if cfg.task == "test":
 		trainer.test(module, test_dl, **trainer_kwargs)
+	else:
+		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
 
 
 if __name__ == "__main__":
+	from rdkit import RDLogger
+	RDLogger.DisableLog('rdApp.*')
+
 	OmegaConf.register_new_resolver("py", resolve_py_path)
+
 	my_app()
