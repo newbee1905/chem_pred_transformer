@@ -11,10 +11,11 @@ from models.utils import DyT, FeedForward, apply_rotary_emb
 # TODO: Implement MHA alternative with Convexifying attention and RWKV version to compare it with default one
 
 class MultiHeadAttention(nn.Module):
-	def __init__(self, d_model, n_heads, dropout=0.1):
+	def __init__(self, d_model, n_heads, max_seq_len=256, dropout=0.1):
 		super(MultiHeadAttention, self).__init__()
 		assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
 		
+		self.max_seq_len = 256
 		self.d_model = d_model
 		self.n_heads = n_heads
 		self.d_k = d_model // n_heads
@@ -65,7 +66,7 @@ class MultiHeadAttention(nn.Module):
 			
 	def forward(
 		self, 
-  	Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, freqs_cis: torch.Tensor,
+		Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, freqs_cis: torch.Tensor,
 		mask: Optional[torch.Tensor] = None, is_causal: bool = False,
 		cache: Optional[dict] = None,
 	):
@@ -73,19 +74,32 @@ class MultiHeadAttention(nn.Module):
 		K = self.split_heads(self.k_proj(K))
 		V = self.split_heads(self.v_proj(V))
 
+		if cache is not None:
+			if "cur_pos" not in cache:
+				batch_size = Q.shape[0]
+				cache["k"] = torch.zeros(
+						batch_size, self.max_seq_len, self.n_heads, self.d_k,
+						device=Q.device, dtype=Q.dtype
+				)
+				cache["v"] = torch.zeros(
+						batch_size, self.max_seq_len, self.n_heads, self.d_k,
+						device=Q.device, dtype=Q.dtype
+				)
+				cache["cur_pos"] = 0
+			cur_pos = cache["cur_pos"]
+			new_length = K.shape[1]
+			cache["k"][:, cur_pos : cur_pos + new_length] = K
+			cache["v"][:, cur_pos : cur_pos + new_length] = V
+			cache["cur_pos"] += new_length
+			K = cache["k"][:, : cache["cur_pos"]]
+			V = cache["v"][:, : cache["cur_pos"]]
+
 		Q, K = apply_rotary_emb(Q, K, freqs_cis=freqs_cis)
-		
-		# if cache is not None:
-		# 	if 'k' in cache and 'v' in cache:
-		# 		K = torch.cat([cache['k'], K], dim=1)
-		# 		V = torch.cat([cache['v'], V], dim=1)
-		# 	cache['k'] = K
-		# 	cache['v'] = V
-		#
+
 		attn_output = self.scaled_dot_product_attention(Q, K, V, mask, is_causal=is_causal)
 		output = self.out_proj(self.combine_heads(attn_output))
 
-		return output
+		return output, cache
 
 class EncoderLayer(nn.Module):
 	def __init__(
@@ -94,7 +108,7 @@ class EncoderLayer(nn.Module):
 		norm_layer=nn.LayerNorm, activation="swiglu",
 	):
 		super().__init__()
-		self.self_attn = MultiHeadAttention(d_model, n_heads, dropout)
+		self.self_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -106,7 +120,7 @@ class EncoderLayer(nn.Module):
 			
 	def forward(self, src: torch.Tensor, freqs_cis: torch.Tensor, src_mask: Optional[torch.Tensor] = None):
 		norm_src = self.self_attn_norm(src)
-		attn_out = self.self_attn(norm_src, norm_src, norm_src, freqs_cis, src_mask)
+		attn_out, _ = self.self_attn(norm_src, norm_src, norm_src, freqs_cis, src_mask)
 		attn_out = self.self_attn_dropout(attn_out)
 		if self.attn_layer_scale is not None:
 			src = src + self.attn_layer_scale * attn_out
@@ -131,12 +145,12 @@ class DecoderLayer(nn.Module):
 	):
 		super().__init__()
 
-		self.self_attn = MultiHeadAttention(d_model, n_heads, dropout)
+		self.self_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.self_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 
-		self.cross_attn = MultiHeadAttention(d_model, n_heads, dropout)
+		self.cross_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
 		self.cross_attn_norm = norm_layer(d_model)
 		self.cross_attn_dropout = nn.Dropout(dropout)
 		self.cross_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -154,7 +168,7 @@ class DecoderLayer(nn.Module):
 		cache: Optional[dict] = None,
 	):
 		norm_tgt = self.self_attn_norm(tgt)
-		self_attn_out = self.self_attn(norm_tgt, norm_tgt, norm_tgt, freqs_cis, tgt_mask, is_causal=True, cache=cache)
+		self_attn_out, cache = self.self_attn(norm_tgt, norm_tgt, norm_tgt, freqs_cis, tgt_mask, is_causal=True, cache=cache)
 		self_attn_out = self.self_attn_dropout(self_attn_out)
 		if self.self_attn_layer_scale is not None:
 			tgt = tgt + self.self_attn_layer_scale * self_attn_out
@@ -162,7 +176,7 @@ class DecoderLayer(nn.Module):
 			tgt = tgt + self_attn_out
 
 		norm_tgt = self.cross_attn_norm(tgt)
-		cross_attn_out = self.cross_attn(norm_tgt, memory, memory, freqs_cis, memory_mask)
+		cross_attn_out, _ = self.cross_attn(norm_tgt, memory, memory, freqs_cis, memory_mask)
 		cross_attn_out = self.cross_attn_dropout(cross_attn_out)
 		if self.cross_attn_layer_scale is not None:
 			tgt = tgt + self.cross_attn_layer_scale * cross_attn_out
@@ -177,7 +191,7 @@ class DecoderLayer(nn.Module):
 		else:
 			tgt = tgt + ff_out
 
-		return tgt
+		return tgt, cache
 
 class GPTDecoderLayer(nn.Module):
 	def __init__(
@@ -186,7 +200,7 @@ class GPTDecoderLayer(nn.Module):
 		norm_layer=nn.LayerNorm, activation="swiglu",
 	):
 		super().__init__()
-		self.self_attn = MultiHeadAttention(d_model, n_heads, dropout)
+		self.self_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.self_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -198,7 +212,7 @@ class GPTDecoderLayer(nn.Module):
 			
 	def forward(self, src: torch.Tensor, freqs_cis: torch.Tensor, src_mask: Optional[torch.Tensor] = None, cache: Optional[dict] = None):
 		norm_src = self.self_attn_norm(src)
-		attn_out = self.self_attn(norm_src, norm_src, norm_src, freqs_cis, src_mask, is_causal=True, cache=cache)
+		attn_out, cache = self.self_attn(norm_src, norm_src, norm_src, freqs_cis, src_mask, is_causal=True, cache=cache)
 		attn_out = self.self_attn_dropout(attn_out)
 		if self.self_attn_layer_scale is not None:
 			src = src + self.self_attn_layer_scale * attn_out
@@ -213,7 +227,7 @@ class GPTDecoderLayer(nn.Module):
 		else:
 			src = src + ff_out
 
-		return src
+		return src, cache
 
 class PreNormEncoderLayer(nn.TransformerEncoderLayer):
 	def forward(self, src, src_mask=None, src_key_padding_mask=None, is_causal=False):

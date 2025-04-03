@@ -67,7 +67,7 @@ def my_app(cfg : DictConfig) -> None:
 
 		test_dl = DataLoader(
 			test_ds,
-			batch_size=cfg.batch_size,
+			batch_size=1,
 			shuffle=False,
 			num_workers=cfg.num_workers
 		)
@@ -82,7 +82,7 @@ def my_app(cfg : DictConfig) -> None:
 
 		test_dl = DataLoader(
 			val_ds,
-			batch_size=cfg.batch_size,
+			batch_size=1,
 			shuffle=False,
 			num_workers=cfg.num_workers
 		)

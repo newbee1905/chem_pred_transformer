@@ -22,3 +22,11 @@ def set_seed(seed: int = 24) -> None:
 
 def filter_none_kwargs(**kwargs):
 	return {k: v for k, v in kwargs.items() if v is not None}
+
+def is_valid_smiles(smi):
+	try:
+		from rdkit import Chem
+		return Chem.MolFromSmiles(smi) is not None
+	except ImportError:
+		return True
+

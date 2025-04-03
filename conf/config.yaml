@@ -42,7 +42,7 @@ trainer:
   # accumulate_grad_batches: 1
   # limit_train_batches: 0.0001
   # limit_val_batches: 0.0001
-  limit_test_batches: 0.0001
+  # limit_test_batches: 0.0001
 
 task: fit
 task_type: pretrain
