@@ -140,8 +140,8 @@ class BARTModel(pl.LightningModule):
 			self.tokenizer.bos_token_id,
 			self.tokenizer.eos_token_id,
 		)
-		# generated_beams = generated_beams.cpu()
-		# beam_scores = beam_scores.cpu()
+		generated_beams = generated_beams.cpu()
+		beam_scores = beam_scores.cpu()
 
 		gen_smiles_candidates = [
 			self.tokenizer.decode(beam, skip_special_tokens=True) for beam in generated_beams
@@ -164,7 +164,7 @@ class BARTModel(pl.LightningModule):
 
 		self.log("t_smi_top1", top1_correct, prog_bar=True, sync_dist=True)
 		self.log("t_smi_top5", top5_correct, prog_bar=True, sync_dist=True)
-		self.log("t_smi_top10", top5_correct, prog_bar=True, sync_dist=True)
+		self.log("t_smi_top1p", top5_correct, prog_bar=True, sync_dist=True)
 
 		self.smiles_metric.update([candidates_sorted[0][0]], ref_smiles)
 		torch.cuda.empty_cache()

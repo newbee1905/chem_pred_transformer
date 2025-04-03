@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from einops import rearrange, repeat
 
-from typing import Optional
+from typing import Optional, Tuple
 
 from models.utils import DyT, precompute_freqs_cis
 from models.transformer import EncoderLayer, DecoderLayer
@@ -139,50 +139,120 @@ class BART(nn.Module):
 
 		return generated
 
+	# def generate(
+	# 	self,
+	# 	src: torch.Tensor,
+	# 	max_length: int = 256,
+	# 	bos_token_id: int = 0,
+	# 	eos_token_id = 1,
+	# 	src_mask: Optional[torch.Tensor] = None,
+	# 	beam_width: int = 15,
+	# 	length_penalty: float = 0.7,
+	# ) -> torch.Tensor:
+	# 	device = src.device
+	# 	batch_size, src_seq_len = src.size()
+	# 	if batch_size != 1:
+	# 		raise NotImplementedError("Beam search is only implemented for batch size 1")
+	#
+	# 	memory = self.encode(src, src_mask)
+	# 	beams = [([bos_token_id], 0.0)]
+	#
+	# 	for _ in range(max_length):
+	# 		new_beams = []
+	#
+	# 		for seq, score in beams:
+	# 			if seq[-1] == eos_token_id:
+	# 				penalised_score = score / (len(seq) ** length_penalty) if len(seq) > src_seq_len else score
+	# 				new_beams.append((seq, score))
+	# 				continue
+	#
+	# 			input_seq = torch.tensor(seq, dtype=torch.long, device=device).unsqueeze(0)
+	# 			dec_out = self.decode(input_seq, memory)
+	# 			logits = self.fc_out(dec_out[:, -1, :])
+	#
+	# 			log_probs = torch.log_softmax(logits, dim=-1).squeeze(0)
+	# 			top_log_probs, top_indices = torch.topk(log_probs, beam_width)
+	#
+	# 			for i in range(beam_width):
+	# 				new_seq = seq + [top_indices[i].item()]
+	# 				new_score = score + top_log_probs[i].item()
+	# 				new_beams.append((new_seq, new_score))
+	#
+	# 		beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
+	# 		if all(seq[-1] == eos_token_id for seq, _ in beams):
+	# 			break
+	#
+	# 	return [b for b, _ in beams], [s for _, s in beams]
 	def generate(
 		self,
 		src: torch.Tensor,
 		max_length: int = 256,
 		bos_token_id: int = 0,
-		eos_token_id = 1,
+		eos_token_id: int = 1,
 		src_mask: Optional[torch.Tensor] = None,
-		beam_width: int = 15,
+		beam_width: int = 10,
 		length_penalty: float = 0.7,
-	) -> torch.Tensor:
-		device = src.device
+	) -> Tuple[torch.Tensor, torch.Tensor]:
 		batch_size, src_seq_len = src.size()
 		if batch_size != 1:
 			raise NotImplementedError("Beam search is only implemented for batch size 1")
 
+		device = src.device
+
 		memory = self.encode(src, src_mask)
-		beams = [([bos_token_id], 0.0)]
 
-		for _ in range(max_length):
-			new_beams = []
+		beam_tokens = torch.full((1, max_length), eos_token_id, dtype=torch.long, device=device)
+		beam_tokens[:, 0] = bos_token_id
+		beam_scores = torch.zeros(1, device=device)
 
-			for seq, score in beams:
-				if seq[-1] == eos_token_id:
-					penalised_score = score / (len(seq) ** length_penalty) if len(seq) > src_seq_len else score
-					new_beams.append((seq, score))
-					continue
+		finished = torch.zeros(1, dtype=torch.bool, device=device)
+		current_length = 1
 
-				input_seq = torch.tensor(seq, dtype=torch.long, device=device).unsqueeze(0)
-				dec_out = self.decode(input_seq, memory)
-				logits = self.fc_out(dec_out[:, -1, :])
+		vocab_size = self.fc_out.out_features 
 
-				log_probs = torch.log_softmax(logits, dim=-1).squeeze(0)
-				top_log_probs, top_indices = torch.topk(log_probs, beam_width)
+		for t in range(1, max_length):
+			num_beams = beam_tokens.size(0)
 
-				for i in range(beam_width):
-					new_seq = seq + [top_indices[i].item()]
-					new_score = score + top_log_probs[i].item()
-					new_beams.append((new_seq, new_score))
+			current_seqs = beam_tokens[:, :current_length]
+			memory_exp = memory.repeat(num_beams, 1, 1)
 
-			beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
-			if all(seq[-1] == eos_token_id for seq, _ in beams):
+			dec_out = self.decode(current_seqs, memory_exp)
+			logits = self.fc_out(dec_out[:, -1, :])
+			log_probs = torch.log_softmax(logits, dim=-1) 
+
+			# Set log-probs to -inf for all tokens except EOS.
+			if finished.any():
+				log_probs[finished] = -float("inf")
+				log_probs[finished, eos_token_id] = 0.0
+
+			total_scores = beam_scores.unsqueeze(1) + log_probs
+			total_scores_flat = total_scores.view(-1)
+
+			top_scores, top_indices = torch.topk(total_scores_flat, beam_width)
+			new_beam_indices = top_indices // vocab_size
+			new_token_indices = top_indices % vocab_size
+
+			new_beam_tokens = beam_tokens[new_beam_indices].clone()
+			new_beam_tokens[:, current_length] = new_token_indices
+
+			new_finished = finished[new_beam_indices] | (new_token_indices == eos_token_id)
+
+			# Apply length normalisation to beams that are finished
+			for i in range(beam_width):
+				if new_finished[i] and (current_length + 1 > src_seq_len):
+					new_beam_scores_i = top_scores[i] / ((current_length + 1) ** length_penalty)
+					top_scores[i] = new_beam_scores_i
+
+			beam_tokens = new_beam_tokens
+			beam_scores = top_scores
+			finished = new_finished
+			current_length += 1
+
+			if finished.all():
 				break
 
-		return [b for b, _ in beams], [s for _, s in beams]
+		return beam_tokens, beam_scores
+
 
 	def sort_beam_candidates(self, ref_smi, gen_smi_candidates, scores, alpha=0.1, beta=10.0):
 		candidates = []
@@ -191,7 +261,7 @@ class BART(nn.Module):
 
 			valid_penalty = 0.0 if is_valid_smiles(smile) else 1.0
 			# new_score = scores[i].item() - alpha * length_penalty - beta * valid_penalty
-			new_score = scores[i] - alpha * length_penalty - beta * valid_penalty
+			new_score = scores[i].item() - alpha * length_penalty - beta * valid_penalty
 
 			candidates.append((smile, new_score))
 
