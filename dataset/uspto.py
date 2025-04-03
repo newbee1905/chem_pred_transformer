@@ -53,7 +53,7 @@ class USPTODataset(Dataset):
 			"attention_mask": attn_mask,
 		}
 
-	def validate_mol(self, mol):
+	def validate_mol(self, org_smi):
 		mol = Chem.MolFromSmiles(org_smi)
 		if mol is None:
 			smi = org_smi
