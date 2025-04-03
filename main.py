@@ -39,7 +39,7 @@ def my_app(cfg : DictConfig) -> None:
 	else:
 		raise ValueError(f"Tokenizer {cfg.tokenizer.type} is not supported")
 
-	if cfg.dataset.split_mode == "predefined":
+	if cfg.dataset.get("split_mode") == "predefined":
 		del cfg.dataset.split_mode
 
 		if cfg.dataset.type == "zinc":
@@ -60,7 +60,8 @@ def my_app(cfg : DictConfig) -> None:
 
 			train_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "train"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			val_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "valid"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-			test_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "test"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			# test_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "test"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, data_splits, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 
 		max_length = train_ds.max_length
 
