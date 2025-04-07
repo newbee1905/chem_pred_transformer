@@ -111,8 +111,13 @@ def my_app(cfg : DictConfig) -> None:
 	if "callbacks" in cfg:
 		for cb_cfg in cfg.callbacks:
 			callbacks.append(instantiate(cb_cfg))
+
+	loggers = []
+	if "loggers" in cfg:
+		for logger_cfg in cfg.loggers:
+			loggers.append(instantiate(logger_cfg))
 	
-	trainer = pl.Trainer(**cfg.trainer, callbacks=callbacks)
+	trainer = pl.Trainer(**cfg.trainer, callbacks=callbacks, logger=loggers)
 
 	trainer_kwargs = filter_none_kwargs(ckpt_path=cfg.get("ckpt_path"))
 
@@ -120,7 +125,6 @@ def my_app(cfg : DictConfig) -> None:
 		trainer.test(module, test_dl, **trainer_kwargs)
 	else:
 		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
-
 
 if __name__ == "__main__":
 	from rdkit import RDLogger
