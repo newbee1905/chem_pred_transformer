@@ -28,7 +28,7 @@ class SMILESTokenizer(PreTrainedTokenizerFast):
 		eos_token: str = "</s>",
 		pad_token: str = "<pad>",
 		mask_token: str = "<mask>",
-		**kwargs,
+		**kwargs
 	):
 		if tokenizer_file is not None:
 			super().__init__(
@@ -102,77 +102,15 @@ class SMILESTokenizer(PreTrainedTokenizerFast):
 
 			return cls(vocab_file=vocab_file_path, merges_file=merges_file_path, **kwargs)
 
-	# @classmethod
-	# def train_new(
-	# 	cls,
-	# 	files: List[str],
-	# 	vocab_size: int = 30000,
-	# 	min_frequency: int = 2000,
-	# 	special_tokens: Optional[List[str]] = None,
-	# 	save_path: Optional[str] = None,
-	# 	augment_factor: int = 1,
-	# 	**kwargs,
-	# ) -> "SMILESTokenizer":
-	# 	default_special_tokens = ["<s>", "</s>", "<unk>", "<pad>", "<mask>"]
-	# 	if special_tokens:
-	# 		default_special_tokens.extend(special_tokens)
-	#
-	# 	smiles_list = []
-	# 	for file in files:
-	# 		with open(file, "r") as f:
-	# 			for line in f:
-	# 				smi = line.strip()
-	# 				if smi:
-	# 					smiles_list.append(smi)
-	#
-	# 	if augment_factor > 0:
-	# 		augmented = []
-	# 		for smi in smiles_list:
-	# 			augmented.append(smi)
-	# 			try:
-	# 				mol = Chem.MolFromSmiles(smi)
-	# 				for _ in range(augment_factor):
-	# 					rand_smi = Chem.MolToSmiles(mol, doRandom=True, canonical=False)
-	# 					augmented.append(rand_smi)
-	# 			except Exception as e:
-	# 				continue
-	# 		smiles_list = augmented
-	#
-	# 	tokenizer = Tokenizer(BPE())
-	# 	tokenizer.pre_tokenizer = pre_tokenizers.Split(
-	# 		pattern=SMI_REGEX_PATTERN,
-	# 		behavior="merged_with_previous"
-	# 	)
-	#
-	# 	trainer = BpeTrainer(
-	# 		vocab_size=vocab_size,
-	# 		min_frequency=min_frequency,
-	# 		special_tokens=default_special_tokens
-	# 	)
-	#
-	# 	tokenizer.train_from_iterator(smiles_list, trainer)
-	# 	tokenizer.decoder = decoders.ByteLevel()
-	#
-	# 	# Handle saving
-	# 	if save_path:
-	# 		tokenizer.save(save_path)
-	# 		return cls(tokenizer_file=save_path, **kwargs)
-	#
-	# 	with tempfile.TemporaryDirectory() as temp_dir:
-	# 		tokenizer_path = os.path.join(temp_dir, "tokenizer.json")
-	# 		tokenizer.save(tokenizer_path)
-	# 		return cls(tokenizer_file=tokenizer_path, **kwargs)
 	@classmethod
 	def train_new(
 		cls,
 		files: List[str],
-		vocab_size: int = 30000,
-		min_frequency: int = 2000,
+		vocab_size: int = 1000,
+		min_frequency: int = 2,
 		special_tokens: Optional[List[str]] = None,
-		save_path: Optional[str] = None,
-		augment_factor: int = 2,
-		batch_size: int = 1000,
-		**kwargs,
+		save_path: Optional[str] = None,  # Allow saving to a user-defined path
+		**kwargs
 	) -> "SMILESTokenizer":
 		default_special_tokens = ["<s>", "</s>", "<unk>", "<pad>", "<mask>"]
 		if special_tokens:
@@ -190,54 +128,10 @@ class SMILESTokenizer(PreTrainedTokenizerFast):
 			special_tokens=default_special_tokens
 		)
 
-		def batched_iterator():
-			for file in files:
-				with open(file, "r") as f:
-					batch = []
-					for line in f:
-						smi = line.strip()
-						if not smi:
-							continue
-							
-						for part in smi.split("."):
-							part = part.strip()
-							if part:
-								batch.append(part)
-								
-								if len(batch) >= batch_size:
-									for item in batch:
-										yield item
-									batch.clear()
-									
-					for item in batch:
-						yield item
-
-		def memory_efficient_augmentation():
-			for smi in batched_iterator():
-				yield smi
-				if augment_factor <= 0:
-					continue
-					
-				try:
-					mol = Chem.MolFromSmiles(smi)
-					if mol is None:
-						continue
-						
-					for _ in range(augment_factor):
-						try:
-							rand_smi = Chem.MolToSmiles(mol, doRandom=True, canonical=False)
-							for part in rand_smi.split("."):
-								part = part.strip()
-								if part:
-									yield part
-						except Exception:
-							continue
-				except Exception:
-					continue
-
-		tokenizer.train_from_iterator(memory_efficient_augmentation(), trainer)
+		tokenizer.train(files, trainer)
 		tokenizer.decoder = decoders.ByteLevel()
 
+		# Handle saving
 		if save_path:
 			tokenizer.save(save_path)
 			return cls(tokenizer_file=save_path, **kwargs)
