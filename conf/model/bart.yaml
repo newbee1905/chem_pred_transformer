@@ -3,5 +3,6 @@ d_model: 768
 n_heads: 12
 n_layers: 6
 d_ff: 3072 # typically d_model * 4
-norm_layer: ${py:torch.nn.RMSNorm}
+# norm_layer: ${py:torch.nn.RMSNorm}
+norm_layer: ${py:models.norm.RMSNorm}
 activation: "swiglu"

@@ -6,100 +6,66 @@ import xformers.ops as xops
 
 from typing import Optional
 
-from models.utils import DyT, FeedForward, apply_rotary_emb
+from models.positional_encoding import apply_rotary_emb
+from models.mha import KVCacheMHA
 
-# TODO: Implement MHA alternative with Convexifying attention and RWKV version to compare it with default one
+class FeedForward(nn.Module):
+	"""Feedforward block with configurable activation.
 
-class MultiHeadAttention(nn.Module):
-	def __init__(self, d_model, n_heads, max_seq_len=256, dropout=0.1):
-		super(MultiHeadAttention, self).__init__()
-		assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
-		
-		self.max_seq_len = 256
-		self.d_model = d_model
-		self.n_heads = n_heads
-		self.d_k = d_model // n_heads
-		
-		# TODO: optimise with qkv_proj instead of 3 separate linear
-		self.q_proj = nn.Linear(d_model, d_model)
-		self.k_proj = nn.Linear(d_model, d_model)
-		self.v_proj = nn.Linear(d_model, d_model)
-		self.out_proj = nn.Linear(d_model, d_model)
+	Supports:
+	- 'swiglu': uses SiLU on the first half and multiplies with the second half.
+	- 'geglu': uses GELU on the first half and multiplies with the second half.
+	- 'gelu': standard feedforward with GELU.
+	- 'silu': standard feedforward with SiLU.
+	"""
+	def __init__(
+			self,
+			d_model: int,
+			d_ff: int,
+			dropout: float = 0.1,
+			activation: str = "SwiGLU",
+		):
+		super().__init__()
 
-		self.p = dropout
-		# self.dropout = nn.Dropout(dropout)
+		self.activation = activation.lower()
+		if self.activation not in ('swiglu', 'silu', 'geglu', 'gelu'):
+			raise ValueError(f"Unknown activation type: {activation}")
 
-		nn.init.xavier_uniform_(self.q_proj.weight, gain=1 / (2 ** 0.5))
-		nn.init.xavier_uniform_(self.k_proj.weight, gain=1 / (2 ** 0.5))
-		nn.init.xavier_uniform_(self.v_proj.weight, gain=1 / (2 ** 0.5))
-		nn.init.xavier_uniform_(self.out_proj.weight)
-		nn.init.zeros_(self.out_proj.bias)
-			
-	def scaled_dot_product_attention(
-		self, 
-		Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor,
-		mask: Optional[torch.Tensor] = None, is_causal: bool = False
-	):
-		# attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
-		# if mask is not None:
-		# 	attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
+		self.uses_gate = self.activation in ('swiglu', 'geglu')
+		self.act_fn = F.silu if self.activation in ('swiglu', 'silu') else F.gelu
 
-		# attn_probs = torch.softmax(attn_scores, dim=-1)
-		# output = torch.matmul(attn_probs, V)
-		# output = self.dropout(output)
+		# TODO: checking out parallel Linear from llama
+		# fc_in can be column parallel
+		# fc_out can be row parallel
 
-		output = xops.memory_efficient_attention(
-			Q, K, V, 
-			p=self.p,
-			attn_bias=None if not is_causal else xops.LowerTriangularMask(),
-		)
+		if self.activation in ('swiglu', 'geglu'):
+			# default scaling down by 2/3 since normal 
+			# d_ff is 4xd_model
+			# Should be ~2.667 scalling now
+			# based on Llama SwiGLU FeedForward
+			# https://github.com/meta-llama/llama
+			d_ff = int(2 * d_ff // 3)
+			self.fc_in = nn.Linear(d_model, d_ff * 2)
+		else:
+			self.fc_in = nn.Linear(d_model, d_ff)
 
-		return output
+		self.fc_out = nn.Linear(d_ff, d_model) # can be row parallel
 
-	def split_heads(self, x):
-		# return rearrange(x, 'b s (h d) -> b h s d', h=self.n_heads)
-		return rearrange(x, 'b s (h d) -> b s h d', h=self.n_heads)
-			
-	def combine_heads(self, x):
-		# return rearrange(x, 'b h s d -> b s (h d)', h=self.n_heads)
-		return rearrange(x, 'b s h d -> b s (h d)', h=self.n_heads)
-			
-	def forward(
-		self, 
-		Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, freqs_cis: torch.Tensor,
-		mask: Optional[torch.Tensor] = None, is_causal: bool = False,
-		cache: Optional[dict] = None,
-	):
-		Q = self.split_heads(self.q_proj(Q))
-		K = self.split_heads(self.k_proj(K))
-		V = self.split_heads(self.v_proj(V))
+		self.dropout = nn.Dropout(dropout)
 
-		if cache is not None:
-			if "cur_pos" not in cache:
-				batch_size = Q.shape[0]
-				cache["k"] = torch.zeros(
-						batch_size, self.max_seq_len, self.n_heads, self.d_k,
-						device=Q.device, dtype=Q.dtype
-				)
-				cache["v"] = torch.zeros(
-						batch_size, self.max_seq_len, self.n_heads, self.d_k,
-						device=Q.device, dtype=Q.dtype
-				)
-				cache["cur_pos"] = 0
-			cur_pos = cache["cur_pos"]
-			new_length = K.shape[1]
-			cache["k"][:, cur_pos : cur_pos + new_length] = K
-			cache["v"][:, cur_pos : cur_pos + new_length] = V
-			cache["cur_pos"] += new_length
-			K = cache["k"][:, : cache["cur_pos"]]
-			V = cache["v"][:, : cache["cur_pos"]]
+	def forward(self, x: torch.Tensor) -> torch.Tensor:
+		x_proj = self.fc_in(x)
 
-		Q, K = apply_rotary_emb(Q, K, freqs_cis=freqs_cis)
+		if self.activation in ('swiglu', 'geglu'):
+			gate, x_proj = x_proj.chunk(2, dim=-1)
+			x_proj = gate * self.act_fn(x_proj)
+		else:
+			x_proj = self.act_fn(x_proj)
 
-		attn_output = self.scaled_dot_product_attention(Q, K, V, mask, is_causal=is_causal)
-		output = self.out_proj(self.combine_heads(attn_output))
+		x = self.fc_out(self.dropout(x_proj))
 
-		return output, cache
+		return x
+
 
 class EncoderLayer(nn.Module):
 	def __init__(
@@ -108,7 +74,7 @@ class EncoderLayer(nn.Module):
 		norm_layer=nn.LayerNorm, activation="swiglu",
 	):
 		super().__init__()
-		self.self_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
+		self.self_attn = KVCacheMHA(d_model, n_heads, dropout)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -118,10 +84,19 @@ class EncoderLayer(nn.Module):
 		self.ff_dropout = nn.Dropout(dropout)
 		self.ff_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 			
-	def forward(self, src: torch.Tensor, freqs_cis: torch.Tensor, src_mask: Optional[torch.Tensor] = None):
+	def forward(
+		self, src: torch.Tensor, src_mask: torch.Tensor = None,
+		freqs_cis: Optional[torch.Tensor] = None, start_pos: int = 0, **kwargs,
+	):
+		seq_len = src.size(0)
+		cur_freqs_cis = None
+		if freqs_cis is not None:
+			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len].to(src.device)
+
 		norm_src = self.self_attn_norm(src)
-		attn_out, _ = self.self_attn(norm_src, norm_src, norm_src, freqs_cis, src_mask)
+		attn_out = self.self_attn(norm_src, norm_src, norm_src, src_mask, freqs_cis=cur_freqs_cis, **kwargs)
 		attn_out = self.self_attn_dropout(attn_out)
+
 		if self.attn_layer_scale is not None:
 			src = src + self.attn_layer_scale * attn_out
 		else:
@@ -130,6 +105,7 @@ class EncoderLayer(nn.Module):
 		norm_src = self.ff_norm(src)
 		ff_out = self.ff(norm_src)
 		ff_out = self.ff_dropout(ff_out)
+
 		if self.ff_layer_scale is not None:
 			src = src + self.ff_layer_scale * ff_out
 		else:
@@ -145,12 +121,12 @@ class DecoderLayer(nn.Module):
 	):
 		super().__init__()
 
-		self.self_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
+		self.self_attn = KVCacheMHA(d_model, n_heads, dropout)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.self_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 
-		self.cross_attn = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout)
+		self.cross_attn = KVCacheMHA(d_model, n_heads, dropout)
 		self.cross_attn_norm = norm_layer(d_model)
 		self.cross_attn_dropout = nn.Dropout(dropout)
 		self.cross_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -163,12 +139,17 @@ class DecoderLayer(nn.Module):
 		self.dropout = nn.Dropout(dropout)
 
 	def forward(
-		self, tgt: torch.Tensor, memory: torch.Tensor, freqs_cis: torch.Tensor,
+		self, tgt: torch.Tensor, memory: torch.Tensor,
 		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
-		cache: Optional[dict] = None,
+		freqs_cis: Optional[torch.Tensor] = None, start_pos: int = 0, **kwargs,
 	):
+		seq_len = tgt.size(0)
+		cur_freqs_cis = None
+		if freqs_cis is not None:
+			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len].to(tgt.device)
+
 		norm_tgt = self.self_attn_norm(tgt)
-		self_attn_out, cache = self.self_attn(norm_tgt, norm_tgt, norm_tgt, freqs_cis, tgt_mask, is_causal=True, cache=cache)
+		self_attn_out = self.self_attn(norm_tgt, norm_tgt, norm_tgt, tgt_mask, is_causal=True, freqs_cis=cur_freqs_cis, **kwargs)
 		self_attn_out = self.self_attn_dropout(self_attn_out)
 		if self.self_attn_layer_scale is not None:
 			tgt = tgt + self.self_attn_layer_scale * self_attn_out
@@ -176,7 +157,7 @@ class DecoderLayer(nn.Module):
 			tgt = tgt + self_attn_out
 
 		norm_tgt = self.cross_attn_norm(tgt)
-		cross_attn_out, _ = self.cross_attn(norm_tgt, memory, memory, freqs_cis, memory_mask)
+		cross_attn_out = self.cross_attn(norm_tgt, memory, memory, memory_mask, freqs_cis=cur_freqs_cis, **kwargs)
 		cross_attn_out = self.cross_attn_dropout(cross_attn_out)
 		if self.cross_attn_layer_scale is not None:
 			tgt = tgt + self.cross_attn_layer_scale * cross_attn_out
@@ -191,7 +172,7 @@ class DecoderLayer(nn.Module):
 		else:
 			tgt = tgt + ff_out
 
-		return tgt, cache
+		return tgt
 
 class GPTDecoderLayer(nn.Module):
 	def __init__(

@@ -5,23 +5,24 @@ import torch.nn.functional as F
 
 import xformers.ops as xops
 
-import models.positional_encoding from apply_rotary_emb
-
+from models.positional_encoding import apply_rotary_emb
+#
+# TODO: Implement MHA alternative with Convexifying attention and RWKV version to compare it with default one
 class KVCacheMHA(nn.Module):
-	def __init__(self, embed_dim: int, n_heads: int, dropout: float = 0.0):
+	def __init__(self, d_model: int, n_heads: int, dropout: float = 0.0):
 		super().__init__()
-		if embed_dim % n_heads != 0:
-			raise ValueError("embed_dim must be divisible by n_heads")
+		if d_model % n_heads != 0:
+			raise ValueError("d_model must be divisible by n_heads")
 
-		self.embed_dim = embed_dim
+		self.d_model = d_model
 		self.n_heads = n_heads
-		self.head_dim = embed_dim // n_heads
+		self.head_dim = d_model // n_heads
 		self.scaling = self.head_dim ** -0.5
 
-		self.q_proj = nn.Linear(embed_dim, embed_dim)
-		self.k_proj = nn.Linear(embed_dim, embed_dim)
-		self.v_proj = nn.Linear(embed_dim, embed_dim)
-		self.out_proj = nn.Linear(embed_dim, embed_dim)
+		self.q_proj = nn.Linear(d_model, d_model)
+		self.k_proj = nn.Linear(d_model, d_model)
+		self.v_proj = nn.Linear(d_model, d_model)
+		self.out_proj = nn.Linear(d_model, d_model)
 		self.p = dropout
 
 	def forward(
@@ -31,7 +32,7 @@ class KVCacheMHA(nn.Module):
 		freqs_cis: torch.Tensor = None,
 		**kwargs,
 	) -> torch.Tensor:
-		# query, key, value: (seq_len, bsz, embed_dim)
+		# query, key, value: (seq_len, bsz, d_model)
 		seq_len, bsz, _ = query.size()
 		k_seq_len = key.size(0)
 		q = self.q_proj(query)
@@ -76,7 +77,7 @@ class KVCacheMHA(nn.Module):
 				attn_mask = attn_mask.materialize(shape=(bsz, self.n_heads, seq_len, k_seq_len), device=q.device)
 
 		attn_output = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=self.p, scale=self.scaling)
-		attn_output = attn_output.permute(2, 0, 1, 3).reshape(seq_len, bsz, self.embed_dim)
+		attn_output = attn_output.permute(2, 0, 1, 3).reshape(seq_len, bsz, self.d_model)
 
 		output = self.out_proj(attn_output)
 		return output

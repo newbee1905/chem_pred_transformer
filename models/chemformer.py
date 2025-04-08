@@ -5,18 +5,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from einops import rearrange, repeat
-
 from typing import Optional
 
-from models.utils import DyT, precompute_freqs_cis
-from models.transformer import PreNormEncoderLayer, PreNormDecoderLayer
+from models.transformer import DecoderLayer, EncoderLayer
+from models.positional_encoding import SinusoidalPositionalEncoding
 
 class Chemformer(nn.Module):
 	def __init__(
 		self, vocab_size: int,
-		d_model: int = 512, n_heads: int = 8, n_layers: int = 6,
-		d_ff: int = 2048, max_seq_len: int = 512,
+		d_model: int = 768, n_heads: int = 12, n_layers: int = 6,
+		d_ff: int = 3072, max_seq_len: int = 256,
 		dropout: float = 0.1,
 		norm_layer=nn.LayerNorm,
 		activation: str = "gelu",
@@ -29,106 +27,63 @@ class Chemformer(nn.Module):
 
 		self.emb = nn.Embedding(vocab_size, d_model)
 		self.dropout = nn.Dropout(dropout)
-		self.register_buffer("pos_emb", self._positional_embs())
 
-		self.encoder = nn.TransformerEncoder(
-			PreNormEncoderLayer(d_model, n_heads, d_ff, dropout, activation),
-			n_layers,
-			norm=nn.LayerNorm(d_model),
-		)
+		self.n_heads = n_heads
+		self.n_layers = n_layers
+		self.d_ff = d_ff
+		self.head_dim = d_model // n_heads
 
-		self.decoder = nn.TransformerDecoder(
-			PreNormDecoderLayer(d_model, n_heads, d_ff, dropout, activation),
-			n_layers,
-			norm=nn.LayerNorm(d_model),
-		)
+		self.pos_encoder = SinusoidalPositionalEncoding(d_model)
+
+		self.enc_layers = nn.ModuleList([
+			EncoderLayer(d_model, n_heads, d_ff, dropout, activation, use_layerscale=False, norm_layer=norm_layer, activation=activation)
+			for _ in range(n_layers)
+		])
+
+		self.dec_layers = nn.ModuleList([
+			DecoderLayer(d_model, n_heads, d_ff, dropout, activation, use_layerscale=False, norm_layer=norm_layer, activation=activation)
+			for _ in range(n_layers)
+		])
 
 		self.token_fc = nn.Linear(d_model, vocab_size)
 
-	def _construct_input(self, token_ids, sentence_masks=None):
-		token_embs = self.emb(token_ids)  # (batch, seq_len, d_model)
-		token_embs = token_embs * math.sqrt(self.d_model)
+	def encode(self, src: torch.Tensor, src_mask: torch.Tensor = None) -> torch.Tensor:
+		# src: (batch, seq_len) -> (seq_len, batch)
+		src = self.emb(src).transpose(0, 1)
+		src = self.pos_encoder(src)
 
-		seq_len = token_ids.size(1)
+		for layer in self.enc_layers:
+			src = layer(src, src_mask)
 
-		positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0)  # (1, seq_len, d_model)
-
-		embs = token_embs + positional_embs
-		return self.dropout(embs).transpose(0, 1)
-
-	def _positional_embs(self):
-		encs = torch.tensor([dim / self.d_model for dim in range(0, self.d_model, 2)])
-		encs = 10000**encs
-		encs = [(torch.sin(pos / encs), torch.cos(pos / encs)) for pos in range(self.max_seq_len)]
-
-		encs = [torch.stack(enc, dim=1).flatten()[: self.d_model] for enc in encs]
-		encs = torch.stack(encs)
-
-		return encs
-
-	def encode(self, src: torch.Tensor, src_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-		x = self._construct_input(src)
-		x = self.encoder(x)
-
-		return x
+		return src
 
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
-		tgt_mask: Optional[torch.Tensor] = None,
-		memory_mask: Optional[torch.Tensor] = None,
+		tgt_mask: torch.Tensor = None, memory_mask: torch.Tensor = None
 	) -> torch.Tensor:
-		x = self._construct_input(tgt)
-		x = self.decoder(x, memory)
+		# tgt_tokens: (batch, seq_len) -> (seq_len, batch)
+		tgt = self.emb(tgt).transpose(0, 1)
+		tgt = self.pos_encoder(tgt)
 
-		return x.transpose(0, 1)
+		for layer in self.dec_layers:
+			tgt = layer(tgt, memory, tgt_mask, memory_mask)
 
-	def forward(self, src: torch.Tensor, tgt: torch.Tensor, src_mask: Optional[torch.Tensor] = None, tgt_mask: Optional[torch.Tensor] = None):
-		_, seq_len = src.shape
-
-		enc_out = self.encode(src, src_mask)
-		dec_out = self.decode(tgt, enc_out, tgt_mask)
-
-		out = self.token_fc(dec_out)
-		return out
+		return tgt
 
 	def generate(
-		self,
-		src: torch.Tensor,
-		max_length: int = 512,
-		bos_token_id: int = 2,
-		eos_token_id = 3,
-		src_mask: Optional[torch.Tensor] = None,
-		top_k: int = 0,
+		self, src: torch.Tensor, src_mask: torch.Tensor, sampler,
+		max_length: int = 50, **sampler_kwargs
 	) -> torch.Tensor:
-		device = src.device
-		batch_size, src_seq_len = src.size()
+		"""Generate full text using an external sampler."""
 		memory = self.encode(src, src_mask)
+		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
 
-		generated = torch.full((batch_size, 1), bos_token_id, dtype=torch.long, device=device)
-		done = torch.zeros(batch_size, dtype=torch.bool, device=device)
+	def forward(
+		self, src: torch.Tensor, tgt: torch.Tensor,
+		src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None,
+	) -> torch.Tensor:
+		memory = self.encode(src, src_mask)
+		decoder_output = self.decode(tgt, memory, tgt_mask, src_mask)
+		logits = self.token_fc(decoder_output)
 
-		for i in range(max_length):
-			dec_out = self.decode(generated, memory)
-			logits = self.token_fc(dec_out[:, -1, :])
-
-			if top_k > 0:
-				top_values, top_indices = torch.topk(logits, k=top_k, dim=-1)
-
-				next_token_logits = torch.full_like(logits, float('-inf'))
-				next_token_logits.scatter_(1, top_indices, top_values)
-
-				probs = F.softmax(next_token_logits, dim=-1)
-
-				next_tokens = torch.multinomial(probs, num_samples=1)
-			else:
-				next_tokens = torch.argmax(logits, dim=-1, keepdim=True)
-
-			next_tokens = next_tokens.masked_fill(done.unsqueeze(-1), eos_token_id)
-			generated = torch.cat([generated, next_tokens], dim=1)
-
-			done = done | (next_tokens.squeeze(-1) == eos_token_id)
-
-			if done.all():
-				break
-
-		return generated
+		return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)

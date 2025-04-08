@@ -1,7 +1,7 @@
 defaults:
   - dataset: uspto
   - tokenizer: hf
-  - model: bart
+  - model: chemformer
   - module: bart
   - _self_
 
