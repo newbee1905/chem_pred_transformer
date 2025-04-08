@@ -80,25 +80,33 @@ class BARTModel(pl.LightningModule):
 		return top1_acc, top5_acc
 
 	def training_step(self, batch, batch_idx):
-		src, tgt = batch["input_ids"], batch["labels"]
+		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]
+		tgt_padding_mask = batch.get("labels_attention_mask", src_padding_mask)
+
+		src_padding_mask = src_padding_mask.eq(0)
+		tgt_padding_mask = tgt_padding_mask.eq(0)
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 		target = tgt[:, 1:]
 
-		logits = self(src, decoder_input)
+		logits = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
 		loss = self._calc_loss(tgt, logits)
 
 		self.log("train_loss", loss, prog_bar=True, sync_dist=True)
 		return loss
 
 	def validation_step(self, batch, batch_idx):
-		src, tgt = batch["input_ids"], batch["labels"]
+		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]
+		tgt_padding_mask = batch.get("labels_attention_mask", src_padding_mask)
+
+		src_padding_mask = src_padding_mask.eq(0)
+		tgt_padding_mask = tgt_padding_mask.eq(0)
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 
-		logits = self(src, decoder_input)
+		logits = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
 		loss = self._calc_loss(tgt, logits)
 
 		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
@@ -117,12 +125,16 @@ class BARTModel(pl.LightningModule):
 
 
 	def test_step(self, batch, batch_idx):
-		src, tgt = batch["input_ids"], batch["labels"]
+		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]
+		tgt_padding_mask = batch.get("labels_attention_mask", src_padding_mask)
+
+		src_padding_mask = src_padding_mask.eq(0)
+		tgt_padding_mask = tgt_padding_mask.eq(0)
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 
-		logits = self(src, decoder_input)
+		logits = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
 		loss = self._calc_loss(tgt, logits)
 
 		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
@@ -147,16 +159,16 @@ class BARTModel(pl.LightningModule):
 			self.tokenizer.decode(beam, skip_special_tokens=True) for beam in generated_beams
 		]
 		ref_smiles = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-		# print("--------------------------")
-		# print("Raw candidate SMILES:")
-		# print(gen_smiles_candidates)
-		# print("Reference SMILES:")
-		# print(ref_smiles[0])
+		print("--------------------------")
+		print("Raw candidate SMILES:")
+		print(gen_smiles_candidates)
+		print("Reference SMILES:")
+		print(ref_smiles[0])
 
 		candidates_sorted = self.model.sort_beam_candidates(ref_smiles, gen_smiles_candidates, beam_scores)
 
-		# print("Final candidate SMILES:")
-		# print(candidates_sorted[0][0])
+		print("Final candidate SMILES:")
+		print(candidates_sorted[0][0])
 
 		top1_correct = 1 if candidates_sorted[0][0] == ref_smiles[0] else 0
 		top5_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(5, len(candidates_sorted))]) else 0

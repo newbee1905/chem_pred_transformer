@@ -45,8 +45,8 @@ class KVCacheMHA(nn.Module):
 		v = v.view(-1, bsz, self.n_heads, self.head_dim).permute(1, 2, 0, 3)
 
 		if freqs_cis is not None:
-				q = apply_rotary_emb(q, freqs_cis=freqs_cis)
-				k = apply_rotary_emb(k, freqs_cis=freqs_cis)
+			q = apply_rotary_emb(q, freqs_cis=freqs_cis)
+			k = apply_rotary_emb(k, freqs_cis=freqs_cis)
 
 		if kv_cache is not None and kv_write_indices is not None:
 			k_cache, v_cache = kv_cache

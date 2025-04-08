@@ -20,15 +20,16 @@ class ZincDataset(PretrainBARTDataset):
 	def __init__(
 		self,
 		smiles_list: list[str], ids_list: list[str],
-		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 512,
-		noise_prob: float = 0.5, tokenizer_type: str = "hf",
+		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
+		noise_prob: float = 0.5, span_lambda: float = 3,
+		tokenizer_type: str = "hf",
 		smiles_column: str = "smiles", id_column: str = "zinc_id"
 	):
 		self.smiles_list = smiles_list
 		self.ids_list = ids_list
 
 		self.tokenizer_type = tokenizer_type
-		super().__init__(tokenizer, max_length, noise_prob)
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
 
 		if tokenizer_type == "hf":
 			self.vocab_size = tokenizer.vocab_size
@@ -54,7 +55,7 @@ def load_smiles_by_set(folder: str, smiles_column="smiles", id_column="zinc_id",
 	}
 
 	for file in tqdm(csv_files, desc="Reading ZINC CSV files"):
-		chunks = pd.read_csv(file, usecols=[smiles_column, id_column, set_column], chunksize=10000)
+		chunks = pd.read_csv(file, usecols=[smiles_column, id_column, set_column], chunksize=100000)
 		for chunk in tqdm(chunks, desc=f"Processing chunks in {path.basename(file)}", leave=False):
 			for set_type in ["train", "val", "test"]:
 				mask = chunk[set_column] == set_type
