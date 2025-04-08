@@ -34,12 +34,6 @@ class BARTModel(pl.LightningModule):
 		self.tokenizer = tokenizer
 		self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
-		# Track accuracy metrics
-		self.val_top1_acc = []
-		self.val_top5_acc = []
-		self.test_top1_acc = []
-		self.test_top5_acc = []
-
 		self.smiles_metric = SMILESEvaluationMetric()
 		self.max_length = max_length
 
@@ -111,9 +105,6 @@ class BARTModel(pl.LightningModule):
 
 		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
 
-		self.val_top1_acc.append(top1_acc)
-		self.val_top5_acc.append(top5_acc)
-
 		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
 		self.log("v_top1", top1_acc, prog_bar=True, sync_dist=True)
 		self.log("v_top5", top5_acc, prog_bar=True, sync_dist=True)
@@ -138,9 +129,6 @@ class BARTModel(pl.LightningModule):
 		loss = self._calc_loss(tgt, logits)
 
 		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
-
-		self.val_top1_acc.append(top1_acc)
-		self.val_top5_acc.append(top5_acc)
 
 		self.log("test_loss", loss, prog_bar=True, sync_dist=True)
 		self.log("t_top1", top1_acc, prog_bar=True, sync_dist=True)
