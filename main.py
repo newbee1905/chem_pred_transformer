@@ -1,3 +1,4 @@
+import os
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
@@ -8,7 +9,7 @@ from tokenisers.chemformer import ChemformerTokenizer
 from torch.utils.data import DataLoader, random_split
 from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
 from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset
-from dataset.zinc import ZincDataset, load_smiles_by_set
+from dataset.zinc import ZincDataset, load_smiles_by_set, preprocess_zinc_data_splits, preprocess_zinc_sqlite
 
 import importlib
 import pickle
@@ -51,6 +52,12 @@ def my_app(cfg : DictConfig) -> None:
 			train_ds = instantiate(cfg.dataset, data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			val_ds = instantiate(cfg.dataset, data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			test_ds = instantiate(cfg.dataset, data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		elif cfg.dataset.type == "zinc_sqlite":
+			del cfg.dataset.type
+
+			train_ds = instantiate(cfg.dataset, split="train", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			val_ds = instantiate(cfg.dataset, split="val", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, split="test", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 		else:
 			with open(cfg.dataset.path, "rb") as f:
 				data_splits = pickle.load(f)
@@ -116,7 +123,9 @@ def my_app(cfg : DictConfig) -> None:
 	if "loggers" in cfg:
 		for logger_cfg in cfg.loggers:
 			loggers.append(instantiate(logger_cfg))
-	
+
+	print(loggers)
+
 	trainer = pl.Trainer(**cfg.trainer, callbacks=callbacks, logger=loggers)
 
 	trainer_kwargs = filter_none_kwargs(ckpt_path=cfg.get("ckpt_path"))
