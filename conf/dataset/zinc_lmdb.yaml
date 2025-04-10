@@ -1,0 +1,7 @@
+type: "zinc_lmdb"
+lmdb_folder: "data/zinc/preprocessed/"
+_target_: dataset.zinc.ZincLMDBDataset
+max_length: 256
+noise_prob: 0.2
+span_lambda: 2
+split_mode: "predefined"

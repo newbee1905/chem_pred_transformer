@@ -9,7 +9,7 @@ from tokenisers.chemformer import ChemformerTokenizer
 from torch.utils.data import DataLoader, random_split
 from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
 from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset
-from dataset.zinc import ZincDataset, load_smiles_by_set, preprocess_zinc_data_splits, preprocess_zinc_sqlite
+from dataset.zinc import ZincDataset, load_smiles_by_set, preprocess_zinc_data_splits_lmdb
 
 import importlib
 import pickle
@@ -58,6 +58,14 @@ def my_app(cfg : DictConfig) -> None:
 			train_ds = instantiate(cfg.dataset, split="train", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			val_ds = instantiate(cfg.dataset, split="val", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			test_ds = instantiate(cfg.dataset, split="test", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		elif cfg.dataset.type == "zinc_lmdb":
+			del cfg.dataset.type
+			lmdb_folder = cfg.dataset.lmdb_folder
+			del cfg.dataset.lmdb_folder
+
+			train_ds = instantiate(cfg.dataset, f"{lmdb_folder}/train.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			val_ds = instantiate(cfg.dataset, f"{lmdb_folder}/val.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, f"{lmdb_folder}/test.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 		else:
 			with open(cfg.dataset.path, "rb") as f:
 				data_splits = pickle.load(f)

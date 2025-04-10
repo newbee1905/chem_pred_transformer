@@ -1,5 +1,7 @@
 from rdkit import Chem
 import sqlite3
+import lmdb
+import pickle
 
 from transformers import PreTrainedTokenizerFast
 from tokenisers.chemformer import ChemformerTokenizer
@@ -61,6 +63,13 @@ class ZincLazyDataset(PretrainBARTDataset):
 		self.split = split
 
 		self.conn = sqlite3.connect(sqlite_db_path)
+
+		self.conn.execute("PRAGMA journal_mode = WAL")
+		self.conn.execute("PRAGMA synchronous = NORMAL")
+		self.conn.execute("PRAGMA cache_size = 100000")
+		self.conn.execute("PRAGMA temp_store = MEMORY")
+		self.conn.execute("PRAGMA mmap_size = 4000000000") 
+
 		cursor = self.conn.cursor()
 		cursor.execute(
 			"SELECT rowid FROM zinc WHERE type = ? ORDER BY rowid;",
@@ -68,17 +77,18 @@ class ZincLazyDataset(PretrainBARTDataset):
 		)
 		self.rowids = [r[0] for r in cursor.fetchall()]
 
+		self.cursor = self.conn.cursor()
+
 	def __len__(self):
 		return len(self.rowids)
 
 	def __getitem__(self, idx):
 		rowid = self.rowids[idx]
-		cursor = self.conn.cursor()
-		cursor.execute(
+		self.cursor.execute(
 			"SELECT smiles FROM zinc WHERE rowid = ?;",
 			(rowid,)
 		)
-		smi = cursor.fetchone()
+		smi = self.cursor.fetchone()[0]
 
 		sample = self.get_smi_data(smi)
 		return sample
@@ -88,6 +98,53 @@ class ZincLazyDataset(PretrainBARTDataset):
 			self.conn.close()
 		except Exception:
 			pass
+
+class ZincLMDBDataset(PretrainBARTDataset):
+	"""
+	Lazy-loading ZINC dataset backed by LMDB.
+	"""
+	def __init__(
+		self,
+		lmdb_path: str,
+		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
+		noise_prob: float = 0.5, span_lambda: float = 3,
+		tokenizer_type: str = "hf",
+		smiles_column: str = "smiles", id_column: str = "zinc_id"
+	):
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
+		self.lmdb_path = lmdb_path
+		self.env = None
+
+		with lmdb.open(
+			self.lmdb_path,
+			readonly=True,
+			lock=False,
+			readahead=False,
+			meminit=False
+		) as env:
+			with env.begin() as txn:
+				self.length = pickle.loads(txn.get(b"__len__"))
+
+	def __len__(self):
+		return self.length
+
+	def __getitem__(self, idx):
+		# Lazy initialisation: If self.env is not defined in this worker, open it.
+		# each worker creates is own env instead of the env being forked around
+		if self.env is None:
+			self.env = lmdb.open(
+				self.lmdb_path,
+				readonly=True,
+				lock=False,
+				readahead=False,
+				meminit=False
+			)
+
+		with self.env.begin(write=False) as txn:
+			key = f"{idx}".encode("ascii")
+			smi = pickle.loads(txn.get(key))
+
+		return self.get_smi_data(smi)
 
 def process_file(file_path, smiles_column="smiles", id_column="zinc_id", set_column="set"):
 	"""
@@ -181,7 +238,7 @@ def preprocess_zinc_sqlite(input_folder):
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			smiles TEXT,
 			zinc_id TEXT,
-		  type TEXT	
+			type TEXT	
 		);
 	""")
 	cursor.execute("CREATE INDEX IF NOT EXISTS idx_type ON zinc(type);")
@@ -194,3 +251,26 @@ def preprocess_zinc_sqlite(input_folder):
 	conn.commit()
 	conn.close()
 	print("Preprocessing complete. SQLite DB saved at:", db_path)
+
+def write_lmdb(smiles_list, lmdb_path):
+	env = lmdb.open(lmdb_path, map_size=1099511627776)  # 1TB max size
+	with env.begin(write=True) as txn:
+		for idx, smi in enumerate(smiles_list):
+			txn.put(f"{idx}".encode("ascii"), pickle.dumps(smi))
+		txn.put(b"__len__", pickle.dumps(len(smiles_list)))
+	env.sync()
+	env.close()
+
+def preprocess_zinc_data_splits_lmdb(data_split, output_folder: str):
+	"""Load SMILES data from CSV files and organize them into train, val, and test lists."""
+
+	if not os.path.exists(output_folder):
+		os.makedirs(output_folder)
+
+	train_smiles = data_split["train"]["smiles"]
+	val_smiles = data_split["val"]["smiles"]
+	test_smiles = data_split["test"]["smiles"]
+
+	write_lmdb(train_smiles, f"{output_folder}/train.lmdb")
+	write_lmdb(val_smiles, f"{output_folder}/val.lmdb")
+	write_lmdb(test_smiles, f"{output_folder}/test.lmdb")
