@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib>=3.10.1",
     "pandas>=2.2.3",
     "pysmilesutils",
+    "pysqlite3>=0.5.4",
     "rdkit>=2024.9.6",
     "tensorboard>=2.19.0",
     "tensorboardx>=2.6.2.2",

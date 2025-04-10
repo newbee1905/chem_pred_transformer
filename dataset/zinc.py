@@ -26,14 +26,13 @@ class ZincDataset(PretrainBARTDataset):
 	
 	def __init__(
 		self,
-		smiles_list: list[str], ids_list: list[str],
+		smiles_list: list[str],
 		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
 		noise_prob: float = 0.5, span_lambda: float = 3,
 		tokenizer_type: str = "hf",
 		smiles_column: str = "smiles", id_column: str = "zinc_id"
 	):
 		self.smiles_list = smiles_list
-		self.ids_list = ids_list
 
 		self.tokenizer_type = tokenizer_type
 		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
@@ -144,6 +143,28 @@ class ZincLMDBDataset(PretrainBARTDataset):
 			key = f"{idx}".encode("ascii")
 			smi = pickle.loads(txn.get(key))
 
+		return self.get_smi_data(smi)
+
+class ZincNMAPDataset(PretrainBARTDataset):
+	"""
+	Lazy-loading ZINC dataset backed by Numpy NMAP.
+	"""
+	def __init__(
+		self,
+		nmap_path: str,
+		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
+		noise_prob: float = 0.5, span_lambda: float = 3,
+		tokenizer_type: str = "hf",
+		smiles_column: str = "smiles", id_column: str = "zinc_id"
+	):
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
+		self.data = read_memmap(nmap_path) 
+
+	def __len__(self):
+		return len(self.data)
+
+	def __getitem__(self, idx):
+		smi = self.data[idx].decode('utf-8')
 		return self.get_smi_data(smi)
 
 def process_file(file_path, smiles_column="smiles", id_column="zinc_id", set_column="set"):
@@ -262,7 +283,7 @@ def write_lmdb(smiles_list, lmdb_path):
 	env.close()
 
 def preprocess_zinc_data_splits_lmdb(data_split, output_folder: str):
-	"""Load SMILES data from CSV files and organize them into train, val, and test lists."""
+	"""Load SMILES data from CSV files and organize them into train, val, and test lmdb."""
 
 	if not os.path.exists(output_folder):
 		os.makedirs(output_folder)
@@ -274,3 +295,32 @@ def preprocess_zinc_data_splits_lmdb(data_split, output_folder: str):
 	write_lmdb(train_smiles, f"{output_folder}/train.lmdb")
 	write_lmdb(val_smiles, f"{output_folder}/val.lmdb")
 	write_lmdb(test_smiles, f"{output_folder}/test.lmdb")
+
+def write_memmap(smiles_list, output_file, max_length=100):
+  n = len(smiles_list)
+
+  memmap_array = np.memmap(output_file, dtype=f'S{max_length}', mode='w+', shape=(n,))
+  
+  for i, s in enumerate(smiles_list):
+    encoded = s.encode('utf-8')[:max_length]
+    memmap_array[i] = encoded
+  
+  memmap_array.flush()
+  return memmap_array
+
+def read_memmap(output_file, max_length=100):
+  return np.memmap(output_file, dtype=f'S{max_length}', mode='r')
+
+def preprocess_zinc_data_splits_nmap(data_split, output_folder: str):
+	"""Load SMILES data from CSV files and organize them into train, val, and test memory map."""
+
+	if not os.path.exists(output_folder):
+		os.makedirs(output_folder)
+
+	train_smiles = data_split["train"]["smiles"]
+	val_smiles = data_split["val"]["smiles"]
+	test_smiles = data_split["test"]["smiles"]
+
+	write_memmap(train_smiles, f"{output_folder}/train.nmap")
+	write_memmap(val_smiles, f"{output_folder}/val.nmap")
+	write_memmap(test_smiles, f"{output_folder}/test.nmap")

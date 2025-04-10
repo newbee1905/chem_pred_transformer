@@ -1,7 +1,7 @@
 type: "zinc_sqlite"
 sqlite_db_path: "data/zinc/zinc_processed.db"
 _target_: dataset.zinc.ZincLazyDataset
-max_length: 256
+max_length: 36
 noise_prob: 0.2
 span_lambda: 2
 split_mode: "predefined"

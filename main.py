@@ -49,9 +49,9 @@ def my_app(cfg : DictConfig) -> None:
 			del cfg.dataset.type
 			del cfg.dataset.path
 
-			train_ds = instantiate(cfg.dataset, data_splits["train"]["smiles"], data_splits["train"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-			val_ds = instantiate(cfg.dataset, data_splits["val"]["smiles"], data_splits["val"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-			test_ds = instantiate(cfg.dataset, data_splits["test"]["smiles"], data_splits["test"]["ids"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			train_ds = instantiate(cfg.dataset, data_splits["train"]["smiles"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			val_ds = instantiate(cfg.dataset, data_splits["val"]["smiles"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, data_splits["test"]["smiles"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 		elif cfg.dataset.type == "zinc_sqlite":
 			del cfg.dataset.type
 
@@ -66,6 +66,14 @@ def my_app(cfg : DictConfig) -> None:
 			train_ds = instantiate(cfg.dataset, f"{lmdb_folder}/train.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			val_ds = instantiate(cfg.dataset, f"{lmdb_folder}/val.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			test_ds = instantiate(cfg.dataset, f"{lmdb_folder}/test.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		elif cfg.dataset.type == "zinc_nmap":
+			del cfg.dataset.type
+			nmap_folder = cfg.dataset.nmap_folder
+			del cfg.dataset.nmap_folder
+
+			train_ds = instantiate(cfg.dataset, f"{nmap_folder}/train.nmap", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			val_ds = instantiate(cfg.dataset, f"{nmap_folder}/val.nmap", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			test_ds = instantiate(cfg.dataset, f"{nmap_folder}/test.nmap", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 		else:
 			with open(cfg.dataset.path, "rb") as f:
 				data_splits = pickle.load(f)

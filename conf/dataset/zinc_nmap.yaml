@@ -1,6 +1,6 @@
-type: "zinc_lmdb"
+type: "zinc_nmap"
 lmdb_folder: "data/zinc/preprocessed/"
-_target_: dataset.zinc.ZincLMDBDataset
+_target_: dataset.zinc.ZincNMAPDataset
 max_length: 36
 noise_prob: 0.2
 span_lambda: 2
