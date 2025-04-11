@@ -4,11 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 def greedy_sampler(
-	model, memory: torch.Tensor, src_mask: torch.Tensor,
+	model, memory: torch.Tensor, src_mask: torch.Tensor = None,
 	max_length: int = 50, start_token_id: int = 0,
 	end_token_id: int = 1,
 	kv_cache: bool = False,
-	length_penalty_alpha: float = 0.6,
+	length_penalty_alpha: float = 0.8,
 ) -> torch.Tensor:
 	"""Greedy decoding sampler."""
 
@@ -30,7 +30,7 @@ def greedy_sampler(
 			tgt_mask=None,
 			memory_mask=src_mask,
 			kv_write_indices=write_idx,
-			# start_pos=t,
+			start_pos=t,
 		)
 
 		last_dec = dec[-1, :, :] if kv_cache else dec[-1]
@@ -59,37 +59,81 @@ def greedy_sampler(
 	return generated
 
 def beam_search_sampler(
-	model, memory: torch.Tensor, src_mask: torch.Tensor,
-	max_length: int = 50, start_token_id: int = 0,
-	end_token_id: int = 2, beam_size: int = 3,
+	model, memory: torch.Tensor, src_mask: torch.Tensor = None,
+	max_length: int = 256, start_token_id: int = 0,
+	end_token_id: int = 1, beam_size: int = 5,
+	length_penalty_alpha: float = 0.8, kv_cache: bool = False
 ) -> torch.Tensor:
-	"""Beam search decoding sampler (batch size 1)."""
-	generated = torch.tensor([[start_token_id]], device=memory.device)
-	beams = [(generated, 0.0)]
 
-	for _ in range(max_length - 1):
-		new_beams = []
-		for seq, score in beams:
-			if seq[0, -1].item() == end_token_id:
-				new_beams.append((seq, score))
-				continue
+	device = memory.device
+	bsz = memory.size(1)
+	vocab_size = model.token_fc.out_features
 
-			dec = model.decode(seq, memory, tgt_mask=None, memory_mask=src_mask)
-			last_dec = dec[-1]	# (1, embed_dim)
+	memory = memory.repeat(1, beam_size, 1)
+	if src_mask is not None:
+		src_mask = src_mask.repeat_interleave(beam_size, dim=0)
 
-			next_logits = model.output_projection(last_dec)	# (1, vocab_size)
-			log_probs = F.log_softmax(next_logits, dim=-1)
-			topk_log_probs, topk_indices = log_probs.topk(beam_size, dim=-1)
+	sequences = torch.full((bsz * beam_size, 1), start_token_id, dtype=torch.long, device=device)
+	beam_scores = torch.zeros(bsz * beam_size, device=device)
 
-			for k in range(beam_size):
-				next_token = topk_indices[0, k].unsqueeze(0).unsqueeze(0)
-				new_seq = torch.cat([seq, next_token], dim=1)
-				new_score = score + topk_log_probs[0, k].item()
-				new_beams.append((new_seq, new_score))
+	beam_scores[torch.arange(bsz * beam_size) % beam_size != 0] = -float("inf")
 
-		beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_size]
-		if all(seq[0, -1].item() == end_token_id for seq, _ in beams):
+	finished = torch.zeros(bsz * beam_size, dtype=torch.bool, device=device)
+
+	sequences = sequences.view(bsz, beam_size, -1)
+	beam_scores = beam_scores.view(bsz, beam_size)
+	finished = finished.view(bsz, beam_size)
+
+	for t in range(max_length - 1):
+		write_idx = torch.arange(t + 1, device=device) if kv_cache else None
+		start_pos = t if kv_cache else 0
+
+		flat_sequences = sequences.view(bsz * beam_size, -1)
+		dec = model.decode(
+			flat_sequences, memory, tgt_mask=None, memory_mask=src_mask,
+			kv_write_indices=write_idx, start_pos=start_pos
+		)
+
+		last_dec = dec[-1, :, :] if kv_cache else dec[-1]
+		# [bsz * beam_size, vocab_size]
+		logits = model.token_fc(last_dec)
+
+		if length_penalty_alpha > 0:
+			lp = ((5 + t + 1) / 6) ** length_penalty_alpha
+			logits[:, end_token_id] -= math.log(lp)
+
+		log_probs = F.log_softmax(logits, dim=-1)
+
+		# For beams already finished, force their distribution to only allow the EOS token.
+		finished_flat = finished.view(bsz * beam_size)
+		log_probs = log_probs.masked_fill(finished_flat.unsqueeze(1), -float("inf"))
+		log_probs[finished_flat, end_token_id] = 0.0
+
+		candidate_scores = beam_scores.view(bsz * beam_size, 1) + log_probs
+		candidate_scores = candidate_scores.view(bsz, beam_size * vocab_size)
+
+		top_scores, top_indices = torch.topk(candidate_scores, beam_size, dim=1)
+
+		# [bsz, beam_size]
+		beam_indices = top_indices // vocab_size	
+		token_indices = top_indices % vocab_size	
+
+		new_sequences = torch.gather(
+			sequences, 1,
+			beam_indices.unsqueeze(-1).expand(bsz, beam_size, t + 1),
+		)
+		new_sequences = torch.cat([new_sequences, token_indices.unsqueeze(-1)], dim=-1)
+
+		new_finished = torch.gather(finished, 1, beam_indices) | (token_indices == end_token_id)
+
+		sequences = new_sequences
+		beam_scores = top_scores
+		finished = new_finished
+
+		if finished.any(dim=1).all():
 			break
 
-	best_seq, _ = max(beams, key=lambda x: x[1])
-	return best_seq
+	sorted_scores, sort_indices = torch.sort(beam_scores, dim=1, descending=True)
+	sorted_sequences = torch.gather(sequences, 1, sort_indices.unsqueeze(-1).expand_as(sequences))
+
+	return sorted_sequences, sorted_scores
