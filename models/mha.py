@@ -65,13 +65,14 @@ class KVCacheMHA(nn.Module):
 			k = apply_rotary_emb(k, freqs_cis, start_pos, k_seq_len)
 
 		if kv_write_indices is not None:
+			assert start_pos + k_seq_len <= self.max_seq_len, "Sequence length exceeds cache capacity"
 			# k and v are of shape (bsz, n_heads, seq_len, head_dim).
 			# Update along the seq_len dimension (dim=2).
 			self.cache_k[:bsz].index_copy_(2, kv_write_indices, k)
 			self.cache_v[:bsz].index_copy_(2, kv_write_indices, v)
 
-			key = self.cache_k[:bsz, :, : k_seq_len, :]
-			value = self.cache_v[:bsz, :, : k_seq_len, :]
+			key = self.cache_k[:bsz, :, : start_pos + k_seq_len, :]
+			value = self.cache_v[:bsz, :, : start_pos + k_seq_len, :]
 		else:
 			key = k
 			value = v
