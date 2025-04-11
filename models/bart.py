@@ -77,10 +77,62 @@ class BART(nn.Module):
 		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
 
 	def forward(
-		self, src_tokens: torch.Tensor, tgt_tokens: torch.Tensor,
+		self, src: torch.Tensor, tgt: torch.Tensor,
 		src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None,
 	) -> torch.Tensor:
+		if self.freqs_cis.device != src.device:
+			self.freqs_cis = self.freqs_cis.to(src.device)
+
 		memory = self.encode(src_tokens, src_mask)
+		decoder_output = self.decode(tgt_tokens, memory, tgt_mask, src_mask)
+		logits = self.token_fc(decoder_output)
+
+		return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
+
+ATOM_LIST = ["H", "B", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"]
+
+class BARTMT(BART):
+	def __init__(
+		self, vocab_size: int,
+		d_model: int = 768, n_heads: int = 12, n_layers: int = 6,
+		d_ff: int = 3072, max_seq_len: int = 256,
+		dropout: float = 0.1,
+		norm_layer=RMSNorm,
+		activation: str = "swiglu",
+	):
+		super().__init__(vocab_size, d_model, n_heads, n_layers, d_ff, max_seq_len, dropout, norm_layer, activation)
+
+		self.weight_fc = nn.Sequential(
+			nn.Linear(self.d_model, self.bart.config.d_model),
+			nn.ReLU(),
+			nn.Linear(self.d_model, invariant_dim)
+		)
+
+		self.atom_count_fc = nn.Sequential(
+			nn.Linear(self.d_model, self.bart.config.d_model),
+			nn.ReLU(),
+			nn.Linear(self.bart.config.d_model, len(ATOM_LIST))
+		)
+
+	def forward(
+		self, src_tokens: torch.Tensor, tgt_tokens: torch.Tensor,
+		src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None,
+		weight_target: torch.Tensor = None, atom_counts_target: torch.Tensor = None,
+	) -> torch.Tensor:
+		memory = self.encode(src_tokens, src_mask)
+
+		pooled = memory.mean(dim=1)
+		atom_counts_pred = self.atom_count_fc(pooled)
+		weight_pred = self.weight_fc(pooled)
+
+		if atom_counts_target is not None:
+			atom_loss = F.mse_loss(atom_counts_pred, atom_counts_target)
+			loss = loss + atom_loss
+
+		if weight_target is not None:
+			weight_loss = F.mse_loss(weight_pred, weight_target)
+			loss = loss + weight_loss
+
 		decoder_output = self.decode(tgt_tokens, memory, tgt_mask, src_mask)
 		logits = self.token_fc(decoder_output)
 

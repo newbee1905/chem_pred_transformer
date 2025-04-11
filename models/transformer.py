@@ -19,12 +19,12 @@ class FeedForward(nn.Module):
 	- 'silu': standard feedforward with SiLU.
 	"""
 	def __init__(
-			self,
-			d_model: int,
-			d_ff: int,
-			dropout: float = 0.1,
-			activation: str = "SwiGLU",
-		):
+		self,
+		d_model: int,
+		d_ff: int,
+		dropout: float = 0.1,
+		activation: str = "SwiGLU",
+	):
 		super().__init__()
 
 		self.activation = activation.lower()
@@ -91,7 +91,7 @@ class EncoderLayer(nn.Module):
 		seq_len = src.size(0)
 		cur_freqs_cis = None
 		if freqs_cis is not None:
-			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len].to(src.device)
+			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len]
 
 		norm_src = self.self_attn_norm(src)
 		attn_out = self.self_attn(norm_src, norm_src, norm_src, src_mask, freqs_cis=cur_freqs_cis, **kwargs)
@@ -146,7 +146,7 @@ class DecoderLayer(nn.Module):
 		seq_len = tgt.size(0)
 		cur_freqs_cis = None
 		if freqs_cis is not None:
-			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len].to(tgt.device)
+			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len]
 
 		norm_tgt = self.self_attn_norm(tgt)
 		self_attn_out = self.self_attn(norm_tgt, norm_tgt, norm_tgt, tgt_mask, is_causal=True, freqs_cis=cur_freqs_cis, **kwargs)
