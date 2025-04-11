@@ -164,7 +164,6 @@ dependencies = [
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pysmilesutils" },
-    { name = "pysqlite3" },
     { name = "rdkit" },
     { name = "tensorboard" },
     { name = "tensorboardx" },
@@ -187,7 +186,6 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pysmilesutils", git = "https://github.com/MolecularAI/pysmilesutils" },
-    { name = "pysqlite3", specifier = ">=0.5.4" },
     { name = "rdkit", specifier = ">=2024.9.6" },
     { name = "tensorboard", specifier = ">=2.19.0" },
     { name = "tensorboardx", specifier = ">=2.6.2.2" },
@@ -1243,12 +1241,6 @@ wheels = [
 name = "pysmilesutils"
 version = "1.1.0"
 source = { git = "https://github.com/MolecularAI/pysmilesutils#98b1f438578b624af3033e33435a8762c02d8093" }
-
-[[package]]
-name = "pysqlite3"
-version = "0.5.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/33/cb/ef7d041dbecfbf47f9241d7cb6328311fd80fe15bd61a6253d9ab36e9d6d/pysqlite3-0.5.4.tar.gz", hash = "sha256:fbc69bfdc0cb43a5badd5403b126d5151371b5037e0397ba9802bb440c5b0021", size = 40743 }
 
 [[package]]
 name = "python-dateutil"

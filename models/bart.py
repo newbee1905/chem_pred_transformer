@@ -14,10 +14,11 @@ class BART(nn.Module):
 	def __init__(
 		self, vocab_size: int,
 		d_model: int = 768, n_heads: int = 12, n_layers: int = 6,
-		d_ff: int = 3072, max_seq_len: int = 256,
+		d_ff: int = 3072, max_seq_len: int = 256, max_batch_size: int = 256,
 		dropout: float = 0.1,
 		norm_layer=RMSNorm,
 		activation: str = "swiglu",
+		theta: float = 10000.0,
 	):
 		super().__init__()
 
@@ -33,15 +34,35 @@ class BART(nn.Module):
 		self.d_ff = d_ff
 		self.head_dim = d_model // n_heads
 
-		self.freqs_cis = precompute_freqs_cis(dim=self.head_dim, end=self.max_seq_len * 2, theta=10000.0)
+		self.freqs_cis = precompute_freqs_cis(dim=self.head_dim, end=self.max_seq_len * 2, theta=theta)
 
 		self.enc_layers = nn.ModuleList([
-			EncoderLayer(d_model, n_heads, d_ff, dropout, activation, norm_layer=norm_layer, activation=activation)
+			EncoderLayer(
+				d_model,
+				n_heads,
+				d_ff,
+				dropout, 
+				activation,
+				norm_layer=norm_layer,
+				activation=activation,
+				max_seq_len=max_seq_len,
+				max_batch_size=max_batch_size,
+			)
 			for _ in range(n_layers)
 		])
 
 		self.dec_layers = nn.ModuleList([
-			DecoderLayer(d_model, n_heads, d_ff, dropout, activation, norm_layer=norm_layer, activation=activation)
+			DecoderLayer(
+				d_model,
+				n_heads,
+				d_ff,
+				dropout, 
+				activation,
+				norm_layer=norm_layer,
+				activation=activation,
+				max_seq_len=max_seq_len,
+				max_batch_size=max_batch_size,
+			)
 			for _ in range(n_layers)
 		])
 
@@ -58,13 +79,20 @@ class BART(nn.Module):
 
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
-		tgt_mask: torch.Tensor = None, memory_mask: torch.Tensor = None
+		tgt_mask: torch.Tensor = None, memory_mask: torch.Tensor = None,
+		kv_write_indices: Optional[torch.Tensor] = None,
+		start_pos: int = 0,
 	) -> torch.Tensor:
 		# tgt: (batch, seq_len) -> (seq_len, batch)
 		tgt = self.emb(tgt).transpose(0, 1)
 
 		for layer in self.dec_layers:
-			tgt = layer(tgt, memory, tgt_mask, memory_mask, freqs_cis=self.freqs_cis)
+			tgt = layer(
+				tgt, memory, tgt_mask, memory_mask,
+				freqs_cis=self.freqs_cis,
+				kv_write_indices=kv_write_indices,
+				start_pos=start_pos,
+			)
 
 		return tgt
 
@@ -73,7 +101,11 @@ class BART(nn.Module):
 		max_length: int = 50, **sampler_kwargs
 	) -> torch.Tensor:
 		"""Generate full text using an external sampler."""
+		if self.freqs_cis.device != src.device:
+			self.freqs_cis = self.freqs_cis.to(src.device)
+
 		memory = self.encode(src, src_mask)
+
 		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
 
 	def forward(

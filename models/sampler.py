@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,25 +6,54 @@ import torch.nn.functional as F
 def greedy_sampler(
 	model, memory: torch.Tensor, src_mask: torch.Tensor,
 	max_length: int = 50, start_token_id: int = 0,
-	end_token_id: int = 2,
+	end_token_id: int = 1,
+	kv_cache: bool = False,
+	length_penalty_alpha: float = 0.6,
 ) -> torch.Tensor:
 	"""Greedy decoding sampler."""
-	batch_size = memory.size(1)
+
+	device = memory.device
+	bsz = memory.size(1)
+
 	generated = torch.full(
-		(batch_size, 1), start_token_id, dtype=torch.long,
-		device=memory.device
+		(bsz, 1), start_token_id, dtype=torch.long,
+		device=device
 	)
+	finished = torch.zeros(bsz, dtype=torch.bool, device=device)
 
-	for _ in range(max_length - 1):
-		dec = model.decode(generated, memory, tgt_mask=None, memory_mask=src_mask)
-		last_dec = dec[-1]	# (batch, embed_dim)
+	for t in range(max_length - 1):
+		write_idx = torch.arange(t + 1, device=device) if kv_cache else None
+		start_pos = t if kv_cache else 0
+		dec = model.decode(
+			generated,
+			memory,
+			tgt_mask=None,
+			memory_mask=src_mask,
+			kv_write_indices=write_idx,
+			# start_pos=t,
+		)
 
-		next_logits = model.output_projection(last_dec)	# (batch, vocab_size)
-		next_tokens = next_logits.argmax(dim=-1).unsqueeze(1)
+		last_dec = dec[-1, :, :] if kv_cache else dec[-1]
 
-		generated = torch.cat([generated, next_tokens], dim=1)
+		logits = model.token_fc(last_dec)
 
-		if (next_tokens == end_token_id).all():
+		if length_penalty_alpha > 0:
+			lp = ((5 + (t + 1)) / 6) ** length_penalty_alpha
+			logits[..., end_token_id] -= math.log(lp)
+
+		log_probs = F.log_softmax(logits, dim=-1)
+		next_token = torch.argmax(log_probs, dim=-1, keepdim=True)
+
+		next_token = torch.where(
+			finished.unsqueeze(-1),
+			torch.tensor(end_token_id, device=device),
+			next_token,
+		)
+
+		generated = torch.cat([generated, next_token], dim=1)
+
+		finished |= (next_token.squeeze(-1) == end_token_id)
+		if finished.all():
 			break
 
 	return generated

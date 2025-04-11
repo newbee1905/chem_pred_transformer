@@ -70,11 +70,12 @@ class FeedForward(nn.Module):
 class EncoderLayer(nn.Module):
 	def __init__(
 		self, d_model: int, n_heads: int, d_ff: int = 3072,
-		dropout: float = 0.2, max_seq_len: int = 1024, use_layerscale: bool = True,
+		dropout: float = 0.2, use_layerscale: bool = True,
 		norm_layer=nn.LayerNorm, activation="swiglu",
+		max_seq_len: int = 256, max_batch_size: int = 256,
 	):
 		super().__init__()
-		self.self_attn = KVCacheMHA(d_model, n_heads, dropout)
+		self.self_attn = KVCacheMHA(d_model, n_heads, dropout, max_seq_len, max_batch_size)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -86,15 +87,15 @@ class EncoderLayer(nn.Module):
 			
 	def forward(
 		self, src: torch.Tensor, src_mask: torch.Tensor = None,
-		freqs_cis: Optional[torch.Tensor] = None, start_pos: int = 0, **kwargs,
+		freqs_cis: Optional[torch.Tensor] = None, start_pos: int = 0,
+		**kwargs,
 	):
-		seq_len = src.size(0)
-		cur_freqs_cis = None
-		if freqs_cis is not None:
-			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len]
-
 		norm_src = self.self_attn_norm(src)
-		attn_out = self.self_attn(norm_src, norm_src, norm_src, src_mask, freqs_cis=cur_freqs_cis, **kwargs)
+		attn_out = self.self_attn(
+			norm_src, norm_src, norm_src, src_mask,
+			start_pos=start_pos, freqs_cis=freqs_cis,
+			**kwargs,
+		)
 		attn_out = self.self_attn_dropout(attn_out)
 
 		if self.attn_layer_scale is not None:
@@ -116,17 +117,18 @@ class EncoderLayer(nn.Module):
 class DecoderLayer(nn.Module):
 	def __init__(
 		self, d_model: int, n_heads: int, d_ff: int = 3072,
-		dropout: float = 0.2, max_seq_len: int = 1024, use_layerscale: bool = True,
+		dropout: float = 0.2, use_layerscale: bool = True,
 		norm_layer=nn.LayerNorm, activation="swiglu",
+		max_seq_len: int = 256, max_batch_size: int = 256,
 	):
 		super().__init__()
 
-		self.self_attn = KVCacheMHA(d_model, n_heads, dropout)
+		self.self_attn = KVCacheMHA(d_model, n_heads, dropout, max_seq_len, max_batch_size)
 		self.self_attn_norm = norm_layer(d_model)
 		self.self_attn_dropout = nn.Dropout(dropout)
 		self.self_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
 
-		self.cross_attn = KVCacheMHA(d_model, n_heads, dropout)
+		self.cross_attn = KVCacheMHA(d_model, n_heads, dropout, max_seq_len, max_batch_size)
 		self.cross_attn_norm = norm_layer(d_model)
 		self.cross_attn_dropout = nn.Dropout(dropout)
 		self.cross_attn_layer_scale = nn.Parameter(torch.ones(d_model) * 1e-4) if use_layerscale else None
@@ -141,15 +143,16 @@ class DecoderLayer(nn.Module):
 	def forward(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
 		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
-		freqs_cis: Optional[torch.Tensor] = None, start_pos: int = 0, **kwargs,
+		freqs_cis: Optional[torch.Tensor] = None,
+		start_pos: int = 0, **kwargs,
 	):
-		seq_len = tgt.size(0)
-		cur_freqs_cis = None
-		if freqs_cis is not None:
-			cur_freqs_cis = freqs_cis[start_pos : start_pos + seq_len]
-
 		norm_tgt = self.self_attn_norm(tgt)
-		self_attn_out = self.self_attn(norm_tgt, norm_tgt, norm_tgt, tgt_mask, is_causal=True, freqs_cis=cur_freqs_cis, **kwargs)
+		self_attn_out = self.self_attn(
+			norm_tgt, norm_tgt, norm_tgt,
+			tgt_mask, is_causal=True, 
+			start_pos=start_pos, freqs_cis=freqs_cis,
+			**kwargs,
+		)
 		self_attn_out = self.self_attn_dropout(self_attn_out)
 		if self.self_attn_layer_scale is not None:
 			tgt = tgt + self.self_attn_layer_scale * self_attn_out
@@ -157,7 +160,10 @@ class DecoderLayer(nn.Module):
 			tgt = tgt + self_attn_out
 
 		norm_tgt = self.cross_attn_norm(tgt)
-		cross_attn_out = self.cross_attn(norm_tgt, memory, memory, memory_mask, freqs_cis=cur_freqs_cis, **kwargs)
+		cross_attn_out = self.cross_attn(
+			norm_tgt, memory, memory, memory_mask,
+			start_pos=start_pos, freqs_cis=freqs_cis,
+		)
 		cross_attn_out = self.cross_attn_dropout(cross_attn_out)
 		if self.cross_attn_layer_scale is not None:
 			tgt = tgt + self.cross_attn_layer_scale * cross_attn_out
