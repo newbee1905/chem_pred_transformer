@@ -69,11 +69,11 @@ class BART(nn.Module):
 		return tgt
 
 	def generate(
-		self, src_tokens: torch.Tensor, src_mask: torch.Tensor, sampler,
+		self, src: torch.Tensor, src_mask: torch.Tensor, sampler,
 		max_length: int = 50, **sampler_kwargs
 	) -> torch.Tensor:
 		"""Generate full text using an external sampler."""
-		memory = self.encode(src_tokens, src_mask)
+		memory = self.encode(src, src_mask)
 		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
 
 	def forward(
@@ -83,8 +83,8 @@ class BART(nn.Module):
 		if self.freqs_cis.device != src.device:
 			self.freqs_cis = self.freqs_cis.to(src.device)
 
-		memory = self.encode(src_tokens, src_mask)
-		decoder_output = self.decode(tgt_tokens, memory, tgt_mask, src_mask)
+		memory = self.encode(src, src_mask)
+		decoder_output = self.decode(tgt, memory, tgt_mask, src_mask)
 		logits = self.token_fc(decoder_output)
 
 		return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
@@ -115,11 +115,11 @@ class BARTMT(BART):
 		)
 
 	def forward(
-		self, src_tokens: torch.Tensor, tgt_tokens: torch.Tensor,
+		self, src: torch.Tensor, tgt: torch.Tensor,
 		src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None,
 		weight_target: torch.Tensor = None, atom_counts_target: torch.Tensor = None,
 	) -> torch.Tensor:
-		memory = self.encode(src_tokens, src_mask)
+		memory = self.encode(src, src_mask)
 
 		pooled = memory.mean(dim=1)
 		atom_counts_pred = self.atom_count_fc(pooled)
@@ -133,7 +133,7 @@ class BARTMT(BART):
 			weight_loss = F.mse_loss(weight_pred, weight_target)
 			loss = loss + weight_loss
 
-		decoder_output = self.decode(tgt_tokens, memory, tgt_mask, src_mask)
+		decoder_output = self.decode(tgt, memory, tgt_mask, src_mask)
 		logits = self.token_fc(decoder_output)
 
 		return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
