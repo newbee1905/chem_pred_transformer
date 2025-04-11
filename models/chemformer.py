@@ -14,7 +14,7 @@ class Chemformer(nn.Module):
 	def __init__(
 		self, vocab_size: int,
 		d_model: int = 768, n_heads: int = 12, n_layers: int = 6,
-		d_ff: int = 3072, max_seq_len: int = 256,
+		d_ff: int = 3072, max_seq_len: int = 256, max_batch_size: int = 256,
 		dropout: float = 0.1,
 		norm_layer=nn.LayerNorm,
 		activation: str = "gelu",
@@ -36,12 +36,32 @@ class Chemformer(nn.Module):
 		self.pos_encoder = SinusoidalPositionalEncoding(d_model)
 
 		self.enc_layers = nn.ModuleList([
-			EncoderLayer(d_model, n_heads, d_ff, dropout, activation, use_layerscale=False, norm_layer=norm_layer, activation=activation)
+			EncoderLayer(
+				d_model,
+				n_heads,
+				d_ff,
+				dropout, 
+				use_layerscale=False, 
+				norm_layer=norm_layer,
+				activation=activation,
+				max_seq_len=max_seq_len,
+				max_batch_size=max_batch_size,
+			)
 			for _ in range(n_layers)
 		])
 
 		self.dec_layers = nn.ModuleList([
-			DecoderLayer(d_model, n_heads, d_ff, dropout, activation, use_layerscale=False, norm_layer=norm_layer, activation=activation)
+			DecoderLayer(
+				d_model,
+				n_heads,
+				d_ff,
+				dropout, 
+				use_layerscale=False, 
+				norm_layer=norm_layer,
+				activation=activation,
+				max_seq_len=max_seq_len,
+				max_batch_size=max_batch_size,
+			)
 			for _ in range(n_layers)
 		])
 
