@@ -19,6 +19,7 @@ from einops import rearrange, repeat
 from typing import Optional, Tuple
 
 from models.bart import BART
+from models.sampler import greedy_sampler, beam_search_sampler
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
@@ -28,16 +29,18 @@ from transformers import get_cosine_schedule_with_warmup
 from utils import is_valid_smiles
 
 class BARTModel(pl.LightningModule): 
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, max_length: int = 256, mode: str = "pretrain"):
+	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, mode: str = "pretrain", sampler: str = "greedy", kv_cache: bool = False):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
 		self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
 		self.smiles_metric = SMILESEvaluationMetric()
-		self.max_length = max_length
+		self.max_length = model.max_seq_len
 
 		self.mode = "pretrain"
+		self.sampler = sampler
+		self.kv_cache = kv_cache
 
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
 		return self.model(src, tgt, src_mask, tgt_mask)
@@ -134,39 +137,56 @@ class BARTModel(pl.LightningModule):
 		self.log("t_top1", top1_acc, prog_bar=True, sync_dist=True)
 		self.log("t_top5", top5_acc, prog_bar=True, sync_dist=True)
 
-		generated_beams, beam_scores = self.model.generate(
-			src.to(self.device),
-			self.max_length,
-			self.tokenizer.bos_token_id,
-			self.tokenizer.eos_token_id,
-		)
-		generated_beams = generated_beams.cpu()
-		beam_scores = beam_scores.cpu()
+		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 
-		gen_smiles_candidates = [
-			self.tokenizer.decode(beam, skip_special_tokens=True) for beam in generated_beams
-		]
-		ref_smiles = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
-		print("--------------------------")
-		print("Raw candidate SMILES:")
-		print(gen_smiles_candidates)
-		print("Reference SMILES:")
-		print(ref_smiles[0])
+		if self.sampler == "greedy":
+			generated_tokens = self.model.generate(
+				src, src_padding_mask, greedy_sampler,
+				max_length=self.max_length,
+				start_token_id=self.tokenizer.bos_token_id,
+				end_token_id=self.tokenizer.eos_token_id,
+				kv_cache=self.kv_cache,
+			)
+			generated_tokens = generated_tokens.cpu()
+			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
+			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
+		else:
+			pass
 
-		candidates_sorted = self.model.sort_beam_candidates(ref_smiles, gen_smiles_candidates, beam_scores)
+		# generated_beams, beam_scores = self.model.generate(
+		# 	src.to(self.device),
+		# 	self.max_length,
+		# 	self.tokenizer.bos_token_id,
+		# 	self.tokenizer.eos_token_id,
+		# )
+		# generated_beams = generated_beams.cpu()
+		# beam_scores = beam_scores.cpu()
 
-		print("Final candidate SMILES:")
-		print(candidates_sorted[0][0])
+		# gen_smiles_candidates = [
+		# 	self.tokenizer.decode(generated, skip_special_tokens=True) for beam in generated_beams
+		# ]
+		# print("--------------------------")
+		# print("Raw candidate SMILES:")
+		# print(gen_smiles_candidates)
+		# print("Reference SMILES:")
+		# print(ref_smiles[0])
+		#
+		# candidates_sorted = self.model.sort_beam_candidates(ref_smiles, gen_smiles_candidates, beam_scores)
+		#
+		# print("Final candidate SMILES:")
+		# print(candidates_sorted[0][0])
 
-		top1_correct = 1 if candidates_sorted[0][0] == ref_smiles[0] else 0
-		top5_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(5, len(candidates_sorted))]) else 0
-		top10_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(10, len(candidates_sorted))]) else 0
+		# top1_correct = 1 if candidates_sorted[0][0] == ref_smiles[0] else 0
+		# top5_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(5, len(candidates_sorted))]) else 0
+		# top10_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(10, len(candidates_sorted))]) else 0
+		#
+		# self.log("t_smi_top1", top1_correct, prog_bar=True, sync_dist=True)
+		# self.log("t_smi_top5", top5_correct, prog_bar=True, sync_dist=True)
+		# self.log("t_smi_top1p", top5_correct, prog_bar=True, sync_dist=True)
 
-		self.log("t_smi_top1", top1_correct, prog_bar=True, sync_dist=True)
-		self.log("t_smi_top5", top5_correct, prog_bar=True, sync_dist=True)
-		self.log("t_smi_top1p", top5_correct, prog_bar=True, sync_dist=True)
-
-		self.smiles_metric.update([candidates_sorted[0][0]], ref_smiles)
+		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 		torch.cuda.empty_cache()
 
 		return {"test_loss": loss}

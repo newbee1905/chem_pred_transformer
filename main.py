@@ -6,6 +6,7 @@ from omegaconf import DictConfig, OmegaConf
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 
+import torch
 from torch.utils.data import DataLoader, random_split
 from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
 from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset
@@ -123,12 +124,14 @@ def my_app(cfg : DictConfig) -> None:
 		num_workers=cfg.num_workers
 	)
 
-	model = instantiate(cfg.model, vocab_size=vocab_size)
+	model = instantiate(cfg.model, vocab_size=vocab_size, max_seq_len=max_length, max_batch_size=cfg.batch_size)
 	if "pretrained_state_dict" in cfg:
 		model.load_state_dict(torch.load(cfg.pretrained_state_dict))
 	print(model)
-	module = instantiate(cfg.module, model, tokenizer, max_length=max_length, mode=cfg.task_type)
-	print(module)
+	module_kwargs = filter_none_kwargs(
+		kv_cache=cfg.get("kv_cache"),
+	)
+	module = instantiate(cfg.module, model, tokenizer, mode=cfg.task_type, **module_kwargs)
 
 	callbacks = []
 	if "callbacks" in cfg:
@@ -140,11 +143,18 @@ def my_app(cfg : DictConfig) -> None:
 		for logger_cfg in cfg.loggers:
 			loggers.append(instantiate(logger_cfg))
 
-	print(loggers)
+	trainer_kwargs = filter_none_kwargs(
+		devices=cfg.get("devices"),
+		num_nodes=cfg.get("num_nodes"),
+		num_sanity_val_steps=cfg.get("num_sanity_val_steps"),
+	)
 
-	trainer = pl.Trainer(**cfg.trainer, callbacks=callbacks, logger=loggers)
+	trainer = pl.Trainer(**cfg.trainer, callbacks=callbacks, logger=loggers, **trainer_kwargs)
 
-	trainer_kwargs = filter_none_kwargs(ckpt_path=cfg.get("ckpt_path"))
+	trainer_kwargs = filter_none_kwargs(
+		ckpt_path=cfg.get("ckpt_path"),
+		sampler=cfg.get("sampler"),
+	)
 
 	if cfg.task == "test":
 		trainer.test(module, test_dl, **trainer_kwargs)
