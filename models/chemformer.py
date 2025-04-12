@@ -79,7 +79,9 @@ class Chemformer(nn.Module):
 
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
-		tgt_mask: torch.Tensor = None, memory_mask: torch.Tensor = None
+		tgt_mask: torch.Tensor = None, memory_mask: torch.Tensor = None,
+		kv_write_indices: Optional[torch.Tensor] = None,
+		start_pos: int = 0,
 	) -> torch.Tensor:
 		# tgt_tokens: (batch, seq_len) -> (seq_len, batch)
 		tgt = self.emb(tgt).transpose(0, 1)
