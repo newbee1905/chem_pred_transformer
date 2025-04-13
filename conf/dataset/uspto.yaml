@@ -1,4 +1,4 @@
 type: "uspto"
 _target_: dataset.uspto.USPTODataset
-path: "USPTO_FULL.csv"
+uspto_csv_file: "USPTO_FULL.csv"
 max_length: 256

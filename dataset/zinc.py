@@ -10,6 +10,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset, random_split
 from dataset.pretrain import PretrainBARTDataset
 
+from utils import write_memmap, read_memmap, write_lmdb
+
 import os
 import pandas as pd
 # import fireducks.pandas as pd
@@ -273,15 +275,6 @@ def preprocess_zinc_sqlite(input_folder):
 	conn.close()
 	print("Preprocessing complete. SQLite DB saved at:", db_path)
 
-def write_lmdb(smiles_list, lmdb_path):
-	env = lmdb.open(lmdb_path, map_size=1099511627776)  # 1TB max size
-	with env.begin(write=True) as txn:
-		for idx, smi in enumerate(smiles_list):
-			txn.put(f"{idx}".encode("ascii"), pickle.dumps(smi))
-		txn.put(b"__len__", pickle.dumps(len(smiles_list)))
-	env.sync()
-	env.close()
-
 def preprocess_zinc_data_splits_lmdb(data_split, output_folder: str):
 	"""Load SMILES data from CSV files and organize them into train, val, and test lmdb."""
 
@@ -295,21 +288,6 @@ def preprocess_zinc_data_splits_lmdb(data_split, output_folder: str):
 	write_lmdb(train_smiles, f"{output_folder}/train.lmdb")
 	write_lmdb(val_smiles, f"{output_folder}/val.lmdb")
 	write_lmdb(test_smiles, f"{output_folder}/test.lmdb")
-
-def write_memmap(smiles_list, output_file, max_length=100):
-  n = len(smiles_list)
-
-  memmap_array = np.memmap(output_file, dtype=f'S{max_length}', mode='w+', shape=(n,))
-  
-  for i, s in enumerate(smiles_list):
-    encoded = s.encode('utf-8')[:max_length]
-    memmap_array[i] = encoded
-  
-  memmap_array.flush()
-  return memmap_array
-
-def read_memmap(output_file, max_length=100):
-  return np.memmap(output_file, dtype=f'S{max_length}', mode='r')
 
 def preprocess_zinc_data_splits_nmap(data_split, output_folder: str):
 	"""Load SMILES data from CSV files and organize them into train, val, and test memory map."""

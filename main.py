@@ -9,7 +9,7 @@ from tokenisers.chemformer import ChemformerTokenizer
 import torch
 from torch.utils.data import DataLoader, random_split
 from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
-from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset
+from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset, preprocess_uspto_lmdb
 from dataset.zinc import ZincDataset, load_smiles_by_set, preprocess_zinc_data_splits_lmdb
 
 import importlib
@@ -97,6 +97,11 @@ def my_app(cfg : DictConfig) -> None:
 		)
 	else:
 		del cfg.dataset.type
+
+		preprocess_uspto_lmdb(cfg.dataset.uspto_csv_file, "data/uspto")	
+		import sys
+		sys.exit(0)
+
 		ds = instantiate(cfg.dataset, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 		train_size = int(cfg.train_split * len(ds))
 		val_size = len(ds) - train_size
