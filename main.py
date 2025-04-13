@@ -98,10 +98,6 @@ def my_app(cfg : DictConfig) -> None:
 	else:
 		del cfg.dataset.type
 
-		preprocess_uspto_lmdb(cfg.dataset.uspto_csv_file, "data/uspto")	
-		import sys
-		sys.exit(0)
-
 		ds = instantiate(cfg.dataset, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 		train_size = int(cfg.train_split * len(ds))
 		val_size = len(ds) - train_size
