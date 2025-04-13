@@ -11,12 +11,9 @@ from typing import List
 
 import lmdb
 from utils import validate_mol, write_lmdb
-from itertools import permutations
 from multiprocessing import Pool, cpu_count
+from itertools import permutations
 from tqdm import tqdm
-import pickle
-from queue import Empty
-import multiprocessing as mp
 
 class USPTODataset(Dataset):
 	def __init__(self, uspto_csv_file: str, tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
@@ -200,65 +197,8 @@ def permute_reaction(reaction_smiles):
 		print(f"Error processing: {reaction_smiles}\n{e}")
 		return []
 
-def producer(reactions, permutation_queue, producer_done_event, pbar):
-	"""Permute reactions and add them to the queue."""
-	try:
-		for reaction in reactions:
-			permutations = permute_reaction(reaction)
-			for permuted in permutations:
-				permutation_queue.put(permuted)
-				pbar.update(1)
-	finally:
-		producer_done_event.set()
-
-def consumer(permutation_queue, output_folder, idx_counter, consumer_done_event, producer_done_event):
-	"""Consume permutations from the queue and write to LMDB."""
-	env = lmdb.open(
-		os.path.join(output_folder, "permuted_uspto.lmdb"),
-		map_size=1099511627776,  # 1TB
-		max_dbs=1
-	)
-	
-	try:
-		while not (producer_done_event.is_set() and permutation_queue.empty()):
-			try:
-				permuted = permutation_queue.get(timeout=1)
-				
-				with env.begin(write=True) as txn:
-					with idx_counter.get_lock():
-						idx = idx_counter.value
-						idx_counter.value += 1
-					
-					txn.put(f"{idx}".encode("ascii"), pickle.dumps(permuted))
-				
-				permutation_queue.task_done()
-				
-			except Empty:
-				continue
-	finally:
-		consumer_done_event.set()
-		env.sync()
-		env.close()
-
-def finalize_lmdb(output_folder, total_count):
-	"""Add the length record to the LMDB file."""
-	env = lmdb.open(
-		os.path.join(output_folder, "permuted_uspto.lmdb"),
-		map_size=1099511627776,  # 1TB
-	)
-
-	with env.begin(write=True) as txn:
-		txn.put(b"__len__", pickle.dumps(total_count))
-
-	env.sync()
-	env.close()
-
-
-def preprocess_uspto_lmdb(uspto_csv_file, output_folder: str, num_workers: int = None, max_queue_size: int = 10000):
+def preprocess_uspto_lmdb(uspto_csv_file, output_folder: str):
 	"""Load SMILES data from CSV files and permute them and save into lmdb."""
-
-	if num_workers is None:
-		num_workers = max(1, mp.cpu_count() - 1)
 
 	uspto_df = pd.read_csv(uspto_csv_file)
 	reactions = uspto_df["reactions"]
@@ -266,40 +206,8 @@ def preprocess_uspto_lmdb(uspto_csv_file, output_folder: str, num_workers: int =
 	if not os.path.exists(output_folder):
 		os.makedirs(output_folder)
 
-	env = lmdb.open(
-		os.path.join(output_folder, "permuted_uspto.lmdb"),
-		map_size=1099511627776, # 1TB
-	)
+	with Pool(processes=cpu_count() - 1) as pool:
+		permuted_reactions = list(tqdm(pool.imap(permute_reaction, reactions), total=len(reactions)))
 
-	permutation_queue = mp.JoinableQueue(maxsize=max_queue_size)
-	producer_done_event = mp.Event()
-	consumer_done_events = [mp.Event() for _ in range(num_workers)]
-	idx_counter = mp.Value('i', 0)
-	
-	total_estimated_perms = len(reactions) * 16
-	pbar = tqdm(total=total_estimated_perms, desc="Processing Permutations")
-
-	producer_process = mp.Process(
-		target=producer, 
-		args=(reactions, permutation_queue, producer_done_event, pbar)
-	)
-	producer_process.start()
-
-	consumer_processes = []
-	for i in range(num_workers):
-		process = mp.Process(
-			target=consumer,
-			args=(permutation_queue, output_folder, idx_counter, consumer_done_events[i], producer_done_event)
-		)
-		process.start()
-		consumer_processes.append(process)
-	
-	producer_process.join()
-	
-	for process in consumer_processes:
-		process.join()
-	
-	total_count = idx_counter.value
-	finalize_lmdb(output_folder, total_count)
-	
-	print(f"Total permutations processed: {total_count}")
+	print(len(permuted_reactions))
+	write_lmdb(permuted_reactions, f"{output_folder}/permuted_uspto.lmdb")
