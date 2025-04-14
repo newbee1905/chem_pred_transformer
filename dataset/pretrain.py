@@ -11,11 +11,12 @@ class PretrainBARTDataset(Dataset):
 	Base class for BART-style pretraining datasets.
 	"""
 	
-	def __init__(self, tokenizer, max_length: int = 64, noise_prob: float = 0.5, span_lambda: float = 3.0):
+	def __init__(self, tokenizer, max_length: int = 64, noise_prob: float = 0.5, span_lambda: float = 3.0, n_merge: int = 0):
 		self.tokenizer = tokenizer
 		self.max_length = max_length
 		self.noise_prob = noise_prob
 		self.span_lambda = span_lambda
+		self.n_merge = n_merge
 
 	def encode_and_pad(self, smiles: str) -> dict:
 		"""
@@ -157,8 +158,14 @@ class PretrainBARTDataset(Dataset):
 		}
 
 	def __getitem__(self, idx):
-		org_smi = self.smiles_list[idx]
+		if self.n_merge < 1:
+			org_smi = self.smiles_list[idx]
+		else:
+			idx = idx * 4
+			org_smi = ".".join(self.smiles_list[idx:idx+4])
 		return self.get_smi_data(org_smi)
 
 	def __len__(self):
-		return len(self.smiles_list)
+		if self.n_merge < 1:
+			return len(self.smiles_list)
+		return len(self.smiles_list) // self.n_merge

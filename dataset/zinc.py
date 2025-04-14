@@ -32,12 +32,13 @@ class ZincDataset(PretrainBARTDataset):
 		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
 		noise_prob: float = 0.5, span_lambda: float = 3,
 		tokenizer_type: str = "hf",
-		smiles_column: str = "smiles", id_column: str = "zinc_id"
+		smiles_column: str = "smiles", id_column: str = "zinc_id",
+		**kwargs,
 	):
 		self.smiles_list = smiles_list
 
 		self.tokenizer_type = tokenizer_type
-		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda, **kwargs)
 
 		if tokenizer_type == "hf":
 			self.vocab_size = tokenizer.vocab_size
@@ -57,10 +58,19 @@ class ZincLazyDataset(PretrainBARTDataset):
 		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
 		noise_prob: float = 0.5, span_lambda: float = 3,
 		tokenizer_type: str = "hf",
-		smiles_column: str = "smiles", id_column: str = "zinc_id"
+		smiles_column: str = "smiles", id_column: str = "zinc_id",
+		**kwargs,
 	):
+		self.tokenizer_type = tokenizer_type
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda, **kwargs)
 
-		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
+		if tokenizer_type == "hf":
+			self.vocab_size = tokenizer.vocab_size
+		elif tokenizer_type == "chemformer":
+			self.vocab_size = len(tokenizer)
+		else:
+			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
+
 		self.split = split
 
 		self.conn = sqlite3.connect(sqlite_db_path)
@@ -110,9 +120,11 @@ class ZincLMDBDataset(PretrainBARTDataset):
 		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
 		noise_prob: float = 0.5, span_lambda: float = 3,
 		tokenizer_type: str = "hf",
-		smiles_column: str = "smiles", id_column: str = "zinc_id"
+		smiles_column: str = "smiles", id_column: str = "zinc_id",
+		**kwargs,
 	):
-		super().__init__(tokenizer, max_length, noise_prob, span_lambda)
+		self.tokenizer_type = tokenizer_type
+		super().__init__(tokenizer, max_length, noise_prob, span_lambda, **kwargs)
 		self.lmdb_path = lmdb_path
 		self.env = None
 
@@ -125,6 +137,13 @@ class ZincLMDBDataset(PretrainBARTDataset):
 		) as env:
 			with env.begin() as txn:
 				self.length = pickle.loads(txn.get(b"__len__"))
+
+		if tokenizer_type == "hf":
+			self.vocab_size = tokenizer.vocab_size
+		elif tokenizer_type == "chemformer":
+			self.vocab_size = len(tokenizer)
+		else:
+			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
 	def __len__(self):
 		return self.length
@@ -142,8 +161,15 @@ class ZincLMDBDataset(PretrainBARTDataset):
 			)
 
 		with self.env.begin(write=False) as txn:
-			key = f"{idx}".encode("ascii")
-			smi = pickle.loads(txn.get(key))
+			if self.n_merge < 1:
+				key = f"{idx}".encode("ascii")
+				smi = pickle.loads(txn.get(key))
+			else:
+				idx = idx * 4
+				ids = list(idx, idx + 4)
+				keys = [f"{i}".encode("ascii") for i in ids]
+				smis = [pickle.loads(txn.get(key)) for key in keys]
+				smi = ".".join(smis)
 
 		return self.get_smi_data(smi)
 
