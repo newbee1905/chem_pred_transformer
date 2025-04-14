@@ -168,7 +168,7 @@ class ZincLMDBDataset(PretrainBARTDataset):
 				smi = pickle.loads(txn.get(key))
 			else:
 				idx = idx * self.n_merge
-				ids = list(idx, idx + self.n_merge)
+				ids = list(range(idx, idx + self.n_merge))
 				keys = [f"{i}".encode("ascii") for i in ids]
 				smis = [pickle.loads(txn.get(key)) for key in keys]
 				smi = ".".join(smis)
