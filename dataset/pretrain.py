@@ -161,8 +161,8 @@ class PretrainBARTDataset(Dataset):
 		if self.n_merge < 1:
 			org_smi = self.smiles_list[idx]
 		else:
-			idx = idx * 4
-			org_smi = ".".join(self.smiles_list[idx:idx+4])
+			idx = idx * self.n_merge
+			org_smi = ".".join(self.smiles_list[idx:idx + self.n_merge])
 		return self.get_smi_data(org_smi)
 
 	def __len__(self):

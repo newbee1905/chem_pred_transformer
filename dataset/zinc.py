@@ -146,7 +146,9 @@ class ZincLMDBDataset(PretrainBARTDataset):
 			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
 	def __len__(self):
-		return self.length
+		if self.n_merge < 1:
+			return self.length
+		return self.length // self.n_merge
 
 	def __getitem__(self, idx):
 		# Lazy initialisation: If self.env is not defined in this worker, open it.
@@ -165,8 +167,8 @@ class ZincLMDBDataset(PretrainBARTDataset):
 				key = f"{idx}".encode("ascii")
 				smi = pickle.loads(txn.get(key))
 			else:
-				idx = idx * 4
-				ids = list(idx, idx + 4)
+				idx = idx * self.n_merge
+				ids = list(idx, idx + self.n_merge)
 				keys = [f"{i}".encode("ascii") for i in ids]
 				smis = [pickle.loads(txn.get(key)) for key in keys]
 				smi = ".".join(smis)
