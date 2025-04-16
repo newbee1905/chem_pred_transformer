@@ -29,7 +29,12 @@ from transformers import get_cosine_schedule_with_warmup
 from utils import is_valid_smiles
 
 class BARTModel(pl.LightningModule): 
-	def __init__(self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer, mode: str = "pretrain", sampler: str = "greedy", kv_cache: bool = False):
+	def __init__(
+			self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer,
+			mode: str = "pretrain",
+			sampler: str = "greedy", kv_cache: bool = False,
+			beam_size: int = 10,
+		):
 		super().__init__()
 		self.model = model
 		self.tokenizer = tokenizer
@@ -41,6 +46,7 @@ class BARTModel(pl.LightningModule):
 		self.mode = "pretrain"
 		self.sampler = sampler
 		self.kv_cache = kv_cache
+		self.beam_size = beam_size
 
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
 		return self.model(src, tgt, src_mask, tgt_mask)
@@ -153,7 +159,44 @@ class BARTModel(pl.LightningModule):
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
 		else:
-			pass
+			generated_tokens, beam_scores = self.model.generate(
+				src, src_padding_mask, beam_search_sampler,
+				max_length=self.max_length,
+				start_token_id=self.tokenizer.bos_token_id,
+				end_token_id=self.tokenizer.eos_token_id,
+				beam_size=self.beam_size,
+				# length_penalty_alpha=self.length_penalty_alpha,
+				kv_cache=self.kv_cache,
+			)
+			
+			top_beam_tokens = generated_tokens[:, 0, :].cpu()
+			gen_smiles_list = self.tokenizer.batch_decode(top_beam_tokens, skip_special_tokens=True)
+
+			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
+			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
+			
+			if self.beam_size >= 5:
+				top5_correct = 0
+				for i, ref in enumerate(ref_smiles_list):
+					top5_beams = generated_tokens[i, :5, :].cpu()
+					top5_smiles = self.tokenizer.batch_decode(top5_beams, skip_special_tokens=True)
+					if ref in top5_smiles:
+						top5_correct += 1
+				top5_accuracy = top5_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+				self.log("t_smi_top5", top5_accuracy, prog_bar=True, sync_dist=True)
+			
+			if self.beam_size >= 10:
+				top10_correct = 0
+				for i, ref in enumerate(ref_smiles_list):
+					top10_beams = generated_tokens[i, :10, :].cpu()
+					top10_smiles = self.tokenizer.batch_decode(top10_beams, skip_special_tokens=True)
+					if ref in top10_smiles:
+						top10_correct += 1
+				top10_accuracy = top10_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+				self.log("t_smi_top10", top10_accuracy, prog_bar=True, sync_dist=True)
+			
+			self.log("t_beam_scores", beam_scores[:, 0].mean(), prog_bar=False, sync_dist=True)
 
 		# generated_beams, beam_scores = self.model.generate(
 		# 	src.to(self.device),
