@@ -8,7 +8,6 @@ def greedy_sampler(
 	max_length: int = 50, start_token_id: int = 0,
 	end_token_id: int = 1,
 	kv_cache: bool = False,
-	length_penalty_alpha: float = 0.8,
 ) -> torch.Tensor:
 	"""Greedy decoding sampler."""
 
@@ -36,10 +35,6 @@ def greedy_sampler(
 		last_dec = dec[-1, :, :] if kv_cache else dec[-1]
 
 		logits = model.token_fc(last_dec)
-
-		if length_penalty_alpha > 0:
-			lp = ((5 + (t + 1)) / 6) ** length_penalty_alpha
-			logits[..., end_token_id] -= math.log(lp)
 
 		log_probs = F.log_softmax(logits, dim=-1)
 		next_token = torch.argmax(log_probs, dim=-1, keepdim=True)
