@@ -31,7 +31,7 @@ class USPTODataset(Dataset):
 			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
 	def __len__(self):
-		return len(self.reactions)
+		return len(self.reactions) * 2
 
 	def encode_and_pad(self, smiles: str) -> dict:
 		"""
@@ -93,11 +93,15 @@ class USPTODataset(Dataset):
 		}
 
 	def __getitem__(self, idx):
-		reaction = self.reactions[idx]
+		reaction = self.reactions[idx // 2]
 		parts = reaction.split(">")
 		if len(parts) == 3:
 			reactants_raw = parts[0].strip()
+			catalyst_raw = parts[1].strip()
 			products_raw	= parts[2].strip()
+
+			if ids % 2 == 1:
+				reactants_raw = f"{reactants_raw}>{catalyst_raw}"
 		else:
 			reactants_raw = reaction.strip()
 			products_raw	= reaction.strip()
@@ -186,6 +190,8 @@ def permute_reaction(reaction_smiles):
 
 		reactant_perms = list(permutations(reactant_mols))
 		product_perms = list(permutations(product_mols))
+
+		print(reactant_perms, product_perms)
 
 		return [
 			f"{'.'.join(r_perm)}>>{'.'.join(p_perm)}"
