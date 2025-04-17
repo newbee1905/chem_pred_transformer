@@ -198,37 +198,6 @@ class BARTModel(pl.LightningModule):
 			
 			self.log("t_beam_scores", beam_scores[:, 0].mean(), prog_bar=False, sync_dist=True)
 
-		# generated_beams, beam_scores = self.model.generate(
-		# 	src.to(self.device),
-		# 	self.max_length,
-		# 	self.tokenizer.bos_token_id,
-		# 	self.tokenizer.eos_token_id,
-		# )
-		# generated_beams = generated_beams.cpu()
-		# beam_scores = beam_scores.cpu()
-
-		# gen_smiles_candidates = [
-		# 	self.tokenizer.decode(generated, skip_special_tokens=True) for beam in generated_beams
-		# ]
-		# print("--------------------------")
-		# print("Raw candidate SMILES:")
-		# print(gen_smiles_candidates)
-		# print("Reference SMILES:")
-		# print(ref_smiles[0])
-		#
-		# candidates_sorted = self.model.sort_beam_candidates(ref_smiles, gen_smiles_candidates, beam_scores)
-		#
-		# print("Final candidate SMILES:")
-		# print(candidates_sorted[0][0])
-
-		# top1_correct = 1 if candidates_sorted[0][0] == ref_smiles[0] else 0
-		# top5_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(5, len(candidates_sorted))]) else 0
-		# top10_correct = 1 if any(smi == ref_smiles[0] for smi, _ in candidates_sorted[:min(10, len(candidates_sorted))]) else 0
-		#
-		# self.log("t_smi_top1", top1_correct, prog_bar=True, sync_dist=True)
-		# self.log("t_smi_top5", top5_correct, prog_bar=True, sync_dist=True)
-		# self.log("t_smi_top1p", top5_correct, prog_bar=True, sync_dist=True)
-
 		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 		torch.cuda.empty_cache()
 
@@ -257,9 +226,15 @@ class BARTModel(pl.LightningModule):
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
 			optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999))
-			scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+
+			scheduler = torch.optim.lr_scheduler.OneCycleLR(
 				optimizer,
-				T_max=10,
-				eta_min=0
+				max_lr=5e-5,
+				total_steps=total_steps,
+				pct_start=0.1,         
+				anneal_strategy="cos",
+				div_factor=25.0,       
+				final_div_factor=1e4,  
 			)
+
 			return [optimizer], [scheduler]
