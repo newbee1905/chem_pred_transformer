@@ -57,10 +57,10 @@ class PretrainBARTDataset(Dataset):
 		mask_id = self.tokenizer.mask_token_id
 
 		length = masked_ids.size(0)
-		i = 0
+		i = 1
 		masked = False
 
-		while i < length:
+		while i < length - 1:
 			if token_ids[i] == pad_id:
 				break
 
