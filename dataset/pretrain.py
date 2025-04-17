@@ -56,45 +56,45 @@ class PretrainBARTDataset(Dataset):
 		pad_id = self.tokenizer.pad_token_id
 		mask_id = self.tokenizer.mask_token_id
 
-		length = masked_ids.size(0)
-		i = 1
+		valid_mask = token_ids != pad_id
+		valid_positions = valid_mask.nonzero(as_tuple=True)[0]
+		
+		if len(valid_positions) == 0:
+			return masked_ids, noise_mask
+
+		random_values = torch.rand(len(valid_positions))
+		mask_positions = valid_positions[random_values < self.noise_prob]
+
+		if len(mask_positions) == 0:
+			random_idx = valid_positions[torch.randint(0, len(valid_positions), (1,)).item()]
+			masked_ids[random_idx] = mask_id
+			noise_mask[random_idx] = True
+			return masked_ids, noise_mask
+
+		span_lengths = torch.poisson(
+			torch.full(
+				(len(mask_positions),), self.span_lambda, 
+				dtype=torch.float, device=token_ids.device
+			)
+		).long() + 1 
+
 		masked = False
-
-		while i < length - 1:
-			if token_ids[i] == pad_id:
-				break
-
-			if torch.rand(1).item() < self.noise_prob:
-				span_length = max(
-					1,
-					int(torch.poisson(
-						torch.tensor(self.span_lambda, dtype=torch.float, device=token_ids.device)
-					).item())
-				)
-
-				# Move end pointer forward, but stop if we hit a pad token
-				end = i
-				count = 0
-				while end < length and count < span_length and token_ids[end] != pad_id:
-					end += 1
-					count += 1
-				
-				if end > i:
-					masked_ids[i:end] = mask_id
-					noise_mask[i:end] = True
-					masked = True
-
-				i = end
-			else:
-				i += 1
-
+		for i, position in enumerate(mask_positions):
+			span_length = span_lengths[i].item()
+			end_position = min(position + span_length, len(token_ids))
+			
+			while end_position > position and end_position < len(token_ids) and not valid_mask[end_position-1]:
+				end_position -= 1
+					
+			if end_position > position:
+				masked_ids[position:end_position] = mask_id
+				noise_mask[position:end_position] = True
+				masked = True
+		
 		if not masked:
-			valid_indices = (token_ids != pad_id).nonzero(as_tuple=False).view(-1)
-
-			if valid_indices.numel() > 0:
-				rand_idx = valid_indices[torch.randint(0, valid_indices.numel(), (1,)).item()]
-				masked_ids[rand_idx] = mask_id
-				noise_mask[rand_idx] = True 
+			random_idx = valid_positions[torch.randint(0, len(valid_positions), (1,)).item()]
+			masked_ids[random_idx] = mask_id
+			noise_mask[random_idx] = True
 
 		return masked_ids, noise_mask
 
