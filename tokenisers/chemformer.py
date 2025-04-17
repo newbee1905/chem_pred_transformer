@@ -67,11 +67,15 @@ class ChemformerTokenizer(SMILESTokenizer):
 		self.mask_token_id = self.vocabulary[self.special_tokens["mask"]]
 		self.bos_token_id = self.vocabulary[self.special_tokens["start"]]
 		self.eos_token_id = self.vocabulary[self.special_tokens["end"]]
+		self.sep_token_id = self.vocabulary[self.special_tokens["sep"]]
 
 		self.pad_token = self.special_tokens["pad"]
 		self.mask_token = self.special_tokens["mask"]
 		self.bos_token = self.special_tokens["start"]
 		self.eos_token = self.special_tokens["end"]
+		self.sep_token = self.special_tokens["sep"]
+
+		self.vocab_size = len(self.vocabulary)
 
 	@property
 	def chem_token_idxs(self) -> List[int]:
