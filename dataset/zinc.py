@@ -117,14 +117,11 @@ class ZincLMDBDataset(PretrainBARTDataset):
 	def __init__(
 		self,
 		lmdb_path: str,
-		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer, max_length: int = 256,
-		noise_prob: float = 0.5, span_lambda: float = 3,
-		tokenizer_type: str = "hf",
-		smiles_column: str = "smiles", id_column: str = "zinc_id",
+		tokenizer: PreTrainedTokenizerFast | ChemformerTokenizer,
+		n_merge: int = 0,
 		**kwargs,
 	):
-		self.tokenizer_type = tokenizer_type
-		super().__init__(tokenizer, max_length, noise_prob, span_lambda, **kwargs)
+		super().__init__(tokenizer, n_merge, **kwargs)
 		self.lmdb_path = lmdb_path
 		self.env = None
 
@@ -137,13 +134,6 @@ class ZincLMDBDataset(PretrainBARTDataset):
 		) as env:
 			with env.begin() as txn:
 				self.length = pickle.loads(txn.get(b"__len__"))
-
-		if tokenizer_type == "hf":
-			self.vocab_size = tokenizer.vocab_size
-		elif tokenizer_type == "chemformer":
-			self.vocab_size = len(tokenizer)
-		else:
-			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
 	def __len__(self):
 		if self.n_merge < 1:
@@ -173,7 +163,10 @@ class ZincLMDBDataset(PretrainBARTDataset):
 				smis = [pickle.loads(txn.get(key)) for key in keys]
 				smi = ".".join(smis)
 
-		return self.get_smi_data(smi)
+		inp_smi, label_smi = self.augment_smi(smi)
+
+		return inp_smi, label_smi
+
 
 class ZincNMAPDataset(PretrainBARTDataset):
 	"""

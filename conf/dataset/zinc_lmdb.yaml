@@ -1,7 +1,9 @@
 type: "zinc_lmdb"
 lmdb_folder: "data/zinc/preprocessed/"
 _target_: dataset.zinc.ZincLMDBDataset
-max_length: 36
-noise_prob: 0.2
-span_lambda: 2
 split_mode: "predefined"
+collator:
+  _target_: dataset.pretrain.PretrainBARTDataCollator
+  max_length: 160
+  noise_prob: 0.2
+  span_lambda: 2

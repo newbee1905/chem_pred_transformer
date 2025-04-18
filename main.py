@@ -5,6 +5,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
+from tokenisers.neochem import ChemformerTokenizerFast
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -36,8 +37,9 @@ def my_app(cfg : DictConfig) -> None:
 
 		vocab_size = tokenizer.vocab_size
 	elif cfg.tokenizer.type == "chemformer":
-		tokenizer = ChemformerTokenizer(filename=cfg.tokenizer.path)
-		vocab_size = len(tokenizer)
+		tokenizer = ChemformerTokenizerFast(cfg.tokenizer.path)
+		# vocab_size = len(tokenizer)
+		vocab_size = tokenizer.vocab_size
 	else:
 		raise ValueError(f"Tokenizer {cfg.tokenizer.type} is not supported")
 
@@ -64,9 +66,12 @@ def my_app(cfg : DictConfig) -> None:
 			lmdb_folder = cfg.dataset.lmdb_folder
 			del cfg.dataset.lmdb_folder
 
-			train_ds = instantiate(cfg.dataset, f"{lmdb_folder}/train.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-			val_ds = instantiate(cfg.dataset, f"{lmdb_folder}/val.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
-			test_ds = instantiate(cfg.dataset, f"{lmdb_folder}/test.lmdb", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+			collator = instantiate(cfg.dataset.collator, tokenizer=tokenizer)
+			del cfg.dataset.collator
+
+			train_ds = instantiate(cfg.dataset, f"{lmdb_folder}/train.lmdb", tokenizer=tokenizer)
+			val_ds = instantiate(cfg.dataset, f"{lmdb_folder}/val.lmdb", tokenizer=tokenizer)
+			test_ds = instantiate(cfg.dataset, f"{lmdb_folder}/test.lmdb", tokenizer=tokenizer)
 		elif cfg.dataset.type == "zinc_nmap":
 			del cfg.dataset.type
 			nmap_folder = cfg.dataset.nmap_folder
@@ -87,13 +92,14 @@ def my_app(cfg : DictConfig) -> None:
 			# test_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "test"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			test_ds = instantiate(cfg.dataset, data_splits, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 
-		max_length = train_ds.max_length
+		max_length = collator.max_length
 
 		test_dl = DataLoader(
 			test_ds,
 			batch_size=cfg.batch_size,
 			shuffle=False,
-			num_workers=cfg.num_workers
+			num_workers=cfg.num_workers,
+			collate_fn=collator,
 		)
 	else:
 		del cfg.dataset.type
@@ -110,20 +116,22 @@ def my_app(cfg : DictConfig) -> None:
 			batch_size=cfg.batch_size,
 			# batch_size=1,
 			shuffle=False,
-			num_workers=cfg.num_workers
+			num_workers=cfg.num_workers,
 		)
 
 	train_dl = DataLoader(
 		train_ds,
 		batch_size=cfg.batch_size,
 		shuffle=True,
-		num_workers=cfg.num_workers
+		num_workers=cfg.num_workers,
+		collate_fn=collator,
 	)
 	val_dl = DataLoader(
 		val_ds,
 		batch_size=cfg.batch_size,
 		shuffle=False,
-		num_workers=cfg.num_workers
+		num_workers=cfg.num_workers,
+		collate_fn=collator,
 	)
 
 	model = instantiate(cfg.model, vocab_size=vocab_size, max_seq_len=max_length, max_batch_size=cfg.batch_size)
