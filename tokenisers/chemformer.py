@@ -2,7 +2,7 @@
 
 """ Module containing tokeniser and maskers """
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from pysmilesutils.tokenize import SMILESTokenizer
@@ -11,7 +11,6 @@ StrList = List[str]
 ListOfStrList = List[StrList]
 BoolList = List[bool]
 ListOfBoolList = List[BoolList]
-
 
 class ChemformerTokenizer(SMILESTokenizer):
 	"""
@@ -152,6 +151,48 @@ class ChemformerTokenizer(SMILESTokenizer):
 	def batch_decode(self, encoded_data: List[torch.Tensor], skip_special_tokens: bool = False) -> List[str]:
 		return self.decode(encoded_data)
 
+	def __call__(
+		self,
+		smiles: Union[str, List[str]],
+		padding: Union[bool, str] = False,
+		truncation: bool = False,
+		max_length: Optional[int]	 = None,
+		return_tensors: Optional[str] = None
+	) -> Dict[str, Union[List[List[int]], torch.Tensor]]:
+
+		encs = self.encode(smiles)
+
+		pad_to = None
+		if padding == "longest":
+			pad_to = max(len(ids) for ids in encs)
+		elif padding == "max_length":
+			pad_to = max_length or self.max_length
+
+		input_ids		 = []
+		attention_mask = []
+
+		for ids in encs:
+			attn = torch.ones_like(ids, dtype=torch.long)
+
+			if pad_to is not None and len(ids) < pad_to:
+				diff = pad_to - len(ids)
+
+				pad_tensor = torch.full((diff,), self.pad_token_id)
+				mask_pad = torch.zeros(diff, dtype=torch.long)
+
+				ids = torch.cat([ids, pad_tensor])
+				attn = torch.cat([attn, mask_pad])
+
+			input_ids.append(ids)
+			attention_mask.append(attn)
+
+		out = {"input_ids": input_ids, "attention_mask": attention_mask}
+
+		if truncation and len(input_ids) == 1:
+			out = {k: v[0] for k, v in out.items()}
+
+		return out
+
 
 class TokensMasker:
 	"""Base-class for different masking strategies"""
@@ -197,7 +238,6 @@ class TokensMasker:
 
 	def _apply_mask(self, tokens: StrList) -> Tuple[StrList, BoolList]:
 		raise NotImplementedError("You need to use one of the sub-classes to mask tokens")
-
 
 class ReplaceTokensMasker(TokensMasker):
 	"""
