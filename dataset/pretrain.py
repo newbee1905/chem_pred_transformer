@@ -89,21 +89,56 @@ class PretrainBARTDataCollator(BARTDataCollator):
 
 	def __call__(self, batch: List[Tuple[str, str]]) -> dict[str, torch.Tensor]:
 		enc = super().__call__(batch)
+		input_ids = enc["input_ids"]
 
-		noisy_input_ids_list = []
-		noise_mask_list = []
-		for i in range(enc["input_ids"].size(0)):
-			noisy_ids, n_mask = self._span_mask_tokens(enc["input_ids"][i])
-			noisy_input_ids_list.append(noisy_ids)
-			noise_mask_list.append(n_mask)
+		bsz, seq_len = input_ids.shape
+		device = input_ids.device
 
-		noisy_input_ids_batch = torch.stack(noisy_input_ids_list, dim=0)
-		noise_mask_batch = torch.stack(noise_mask_list, dim=0)
+		valid = enc["attention_mask"].bool()
+		valid[:, 0] = False
+		valid[:, -1] = False
+
+		valid_counts = valid.sum(dim=1)
+		num_spans = (valid_counts.float() * self.noise_prob).floor().to(torch.long).clamp(min=1)
+		max_k = int(num_spans.max())
+
+		rnd = torch.rand((bsz, seq_len), device=device)
+		rnd.masked_fill_(~valid, 1.0)
+
+		_, starts = torch.topk(rnd, max_k, dim=1, largest=False)  # [bsz, max_k]
+		lengths = torch.poisson(
+			torch.full(
+				(bsz, max_k), self.span_lambda,
+				dtype=torch.float, device=device
+			)
+		).long() + 1
+
+		idxs = torch.arange(max_k, device=device).unsqueeze(0).expand(bsz, -1)
+		mask_valid_span = idxs < num_spans.unsqueeze(1)
+		lengths = lengths * mask_valid_span
+
+		pos = torch.arange(seq_len, device=device).view(1, 1, seq_len)
+		st  = starts.unsqueeze(2)
+		ln  = lengths.unsqueeze(2)  
+		mask3d = (pos >= st) & (pos < (st + ln))
+
+		noise_mask = mask3d.any(dim=1)
+
+		empty = ~noise_mask.any(dim=1)
+		if empty.any():
+			for i in empty.nonzero(as_tuple=True)[0]:
+				valid_pos = valid[i].nonzero(as_tuple=True)[0]
+				if valid_pos.numel():
+					j = valid_pos[torch.randint(len(valid_pos), (1,))]
+					noise_mask[i, j] = True
+
+		noise_inputs = input_ids.clone()
+		noise_inputs[noise_mask] = self.mask_token_id
 
 		return {
-			"input_ids": noisy_input_ids_batch,
+			"input_ids": noise_inputs,
 			"attention_mask": enc["attention_mask"],
-			"noise_mask": noise_mask_batch, 
+			"noise_mask": noise_mask, 
 			"labels": enc["labels"],
 			"labels_attention_mask": enc["labels_attention_mask"],
 		}
