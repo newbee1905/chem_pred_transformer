@@ -1,4 +1,6 @@
 type: "uspto"
 _target_: dataset.uspto.USPTODataset
-uspto_csv_file: "USPTO_FULL.csv"
-max_length: 256
+uspto_csv_file: "USPTO_MIT.csv"
+collator:
+  _target_: dataset.pretrain.BARTDataCollator
+  max_length: 282

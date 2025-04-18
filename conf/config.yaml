@@ -6,7 +6,7 @@ defaults:
   - _self_
 
 seed: 24
-train_split: 0.9
+train_split: 0.99
 
 batch_size: 8
 num_workers: 8

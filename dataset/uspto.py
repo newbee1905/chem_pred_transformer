@@ -16,81 +16,12 @@ from itertools import permutations
 from tqdm import tqdm
 
 class USPTODataset(Dataset):
-	def __init__(self, uspto_csv_file: str, tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):
+	def __init__(self, uspto_csv_file: str):
 		uspto_df = pd.read_csv(uspto_csv_file)
-
 		self.reactions = uspto_df["reactions"]
-		self.tokenizer = tokenizer
-		self.max_length = max_length
-
-		if tokenizer_type == "hf":
-			self.vocab_size = tokenizer.vocab_size
-		elif tokenizer_type == "chemformer":
-			self.vocab_size = len(tokenizer)
-		else:
-			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
 
 	def __len__(self):
 		return len(self.reactions) * 2
-
-	def encode_and_pad(self, smiles: str) -> dict:
-		"""
-		Tokenises and pads a SMILES string for Chemformer tokenisers.
-		"""
-
-		token_ids = self.tokenizer.encode(smiles)[0]
-		token_ids = token_ids[:self.max_length]
-		attn_mask = torch.ones_like(token_ids, dtype=torch.long)
-
-		current_len = token_ids.size(0)
-
-		if current_len < self.max_length:
-			pad_token_id = self.tokenizer.vocabulary[self.tokenizer.special_tokens["pad"]]
-
-			pad_length = self.max_length - current_len
-
-			pad_tensor = torch.full((pad_length,), pad_token_id)
-			mask_pad = torch.zeros(pad_length, dtype=torch.long)
-
-			token_ids = torch.cat([token_ids, pad_tensor])
-			attn_mask = torch.cat([attn_mask, mask_pad])
-
-		return {
-			"input_ids": token_ids,
-			"attention_mask": attn_mask,
-		}
-
-	def get_smi_data(self, smi):
-		if self.tokenizer.bos_token is not None:
-			if not smi.startswith(self.tokenizer.bos_token):
-				smi = self.tokenizer.bos_token + smi
-		if self.tokenizer.eos_token is not None:
-			if not smi.endswith(self.tokenizer.eos_token):
-				smi = smi + self.tokenizer.eos_token
-		
-		if getattr(self, "tokenizer_type", "hf") == "hf":
-			enc_inp = self.tokenizer(
-				smi,
-				truncation=True,
-				max_length=self.max_length,
-				padding="max_length",
-				return_tensors="pt"
-			)
-
-			inp_ids = enc_inp["input_ids"].squeeze(0)
-			attn_mask = enc_inp["attention_mask"].squeeze(0)
-		elif self.tokenizer_type == "chemformer":
-			enc_inp = self.encode_and_pad(inp_smi)
-
-			inp_ids = enc_inp["input_ids"]
-			attn_mask = enc_inp["attention_mask"]
-		else:
-			raise ValueError("Invalid tokenizer_type. Use 'hf' or 'chemformer'.")
-
-		return {
-			"input_ids": inp_ids,
-			"attention_mask": attn_mask,
-		}
 
 	def __getitem__(self, idx):
 		reaction = self.reactions[idx // 2]
@@ -100,23 +31,13 @@ class USPTODataset(Dataset):
 			catalyst_raw = parts[1].strip()
 			products_raw	= parts[2].strip()
 
-			if ids % 2 == 1:
+			if idx % 2 == 1:
 				reactants_raw = f"{reactants_raw}>{catalyst_raw}"
 		else:
 			reactants_raw = reaction.strip()
 			products_raw	= reaction.strip()
 
-		reactants_raw = validate_mol(reactants_raw)
-		products_raw = validate_mol(products_raw)
-
-		inp = self.get_smi_data(reactants_raw)
-		label = self.get_smi_data(products_raw)
-
-		return {
-			"input_ids": inp["input_ids"].squeeze(0),
-			"attention_mask": inp["attention_mask"].squeeze(0),
-			"labels": label["input_ids"].squeeze(0),
-		}
+		return reactants_raw, products_raw
 
 class USPTORetrosynthesisDataset(USPTODataset):
 	def __init__(self, uspto_csv_file: str, tokenizer, max_length: int = 256, tokenizer_type: str = "hf"):

@@ -104,12 +104,15 @@ def my_app(cfg : DictConfig) -> None:
 	else:
 		del cfg.dataset.type
 
-		ds = instantiate(cfg.dataset, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		collator = instantiate(cfg.dataset.collator, tokenizer=tokenizer)
+		del cfg.dataset.collator
+
+		ds = instantiate(cfg.dataset)
 		train_size = int(cfg.train_split * len(ds))
 		val_size = len(ds) - train_size
 		train_ds, val_ds = random_split(ds, [train_size, val_size])
 
-		max_length = ds.max_length
+		max_length = collator.max_length
 
 		test_dl = DataLoader(
 			val_ds,
@@ -117,6 +120,7 @@ def my_app(cfg : DictConfig) -> None:
 			# batch_size=1,
 			shuffle=False,
 			num_workers=cfg.num_workers,
+			collate_fn=collator,
 		)
 
 	train_dl = DataLoader(
