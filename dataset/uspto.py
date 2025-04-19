@@ -37,6 +37,17 @@ class USPTODataset(Dataset):
 			reactants_raw = reaction.strip()
 			products_raw	= reaction.strip()
 
+		if self.bos_token:
+			if not reactants_raw.startswith(self.bos_token):
+				reactants_raw = self.bos_token + reactants_raw
+			if not products_raw.startswith(self.bos_token):
+				products_raw = self.bos_token + products_raw
+		if self.eos_token:
+			if not reactants_raw.endswith(self.eos_token):
+				reactants_raw = reactants_raw + self.eos_token
+			if not products_raw.endswith(self.eos_token):
+				products_raw = products_raw + self.eos_token
+
 		return reactants_raw, products_raw
 
 class USPTORetrosynthesisDataset(USPTODataset):
