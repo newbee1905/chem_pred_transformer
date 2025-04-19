@@ -16,9 +16,14 @@ from itertools import permutations
 from tqdm import tqdm
 
 class USPTODataset(Dataset):
-	def __init__(self, uspto_csv_file: str):
+	def __init__(self, uspto_csv_file: str, tokenizer: PreTrainedTokenizerFast):
 		uspto_df = pd.read_csv(uspto_csv_file)
 		self.reactions = uspto_df["reactions"]
+
+		self.pad_token_id = tokenizer.pad_token_id
+		self.mask_token_id = tokenizer.mask_token_id
+		self.bos_token = tokenizer.bos_token
+		self.eos_token = tokenizer.eos_token
 
 	def __len__(self):
 		return len(self.reactions) * 2

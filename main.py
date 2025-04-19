@@ -107,7 +107,7 @@ def my_app(cfg : DictConfig) -> None:
 		collator = instantiate(cfg.dataset.collator, tokenizer=tokenizer)
 		del cfg.dataset.collator
 
-		ds = instantiate(cfg.dataset)
+		ds = instantiate(cfg.dataset, tokenizer=tokenizer)
 		train_size = int(cfg.train_split * len(ds))
 		val_size = len(ds) - train_size
 		train_ds, val_ds = random_split(ds, [train_size, val_size])
