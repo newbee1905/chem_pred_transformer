@@ -38,7 +38,7 @@ class USPTODataset(Dataset):
 
 			if idx % 2 == 1:
 				reactants_raw = f"{reactants_raw}>{catalyst_raw}"
-			else
+			else:
 				new_reactants_raw = f"{reactants_raw}.{catalyst_raw}"
 				try:
 					mol = Chem.MolFromSmiles(new_reactants_raw)
