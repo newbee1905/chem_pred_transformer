@@ -38,9 +38,14 @@ class USPTODataset(Dataset):
 
 			if idx % 2 == 1:
 				reactants_raw = f"{reactants_raw}>{catalyst_raw}"
-			elif len(catalyst_raw) > 0:
-				reactants_raw = f"{reactants_raw}.{catalyst_raw}"
-				reactants_raw = Chem.MolToSmiles(Chem.MolFromSmiles(reactants_raw), canonical=True)
+			else
+				new_reactants_raw = f"{reactants_raw}.{catalyst_raw}"
+				try:
+					mol = Chem.MolFromSmiles(new_reactants_raw)
+					if mol is not None
+						reactants_raw = Chem.MolToSmiles(new_reactants_raw, canonical=True)
+				except:
+					pass
 		else:
 			reactants_raw = reaction.strip()
 			products_raw	= reaction.strip()
