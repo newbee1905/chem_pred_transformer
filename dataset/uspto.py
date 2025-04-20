@@ -42,7 +42,7 @@ class USPTODataset(Dataset):
 				new_reactants_raw = f"{reactants_raw}.{catalyst_raw}"
 				try:
 					mol = Chem.MolFromSmiles(new_reactants_raw)
-					if mol is not None
+					if mol is not None:
 						reactants_raw = Chem.MolToSmiles(new_reactants_raw, canonical=True)
 				except:
 					pass
