@@ -16,9 +16,10 @@ from itertools import permutations
 from tqdm import tqdm
 
 class USPTODataset(Dataset):
-	def __init__(self, uspto_csv_file: str, tokenizer: PreTrainedTokenizerFast):
+	def __init__(self, uspto_csv_file: str, tokenizer: PreTrainedTokenizerFast, mode: str = "mixed"):
 		uspto_df = pd.read_csv(uspto_csv_file)
 		self.reactions = uspto_df["reactions"]
+		self.mode = mode
 
 		self.pad_token_id = tokenizer.pad_token_id
 		self.mask_token_id = tokenizer.mask_token_id
@@ -26,18 +27,20 @@ class USPTODataset(Dataset):
 		self.eos_token = tokenizer.eos_token
 
 	def __len__(self):
-		return len(self.reactions) * 2
+		return len(self.reactions)
 
 	def __getitem__(self, idx):
-		reaction = self.reactions[idx // 2]
+		reaction = self.reactions[idx]
+
 		parts = reaction.split(">")
 		if len(parts) == 3:
 			reactants_raw = parts[0].strip()
 			catalyst_raw = parts[1].strip()
 			products_raw	= parts[2].strip()
 
-			if idx % 2 == 1:
-				reactants_raw = f"{reactants_raw}>{catalyst_raw}"
+			if self.mode == "sep":
+				if len(catalyst_raw) > 0 and catalyst_raw is not "":
+					reactants_raw = f"{reactants_raw}>{catalyst_raw}"
 			else:
 				new_reactants_raw = f"{reactants_raw}.{catalyst_raw}"
 				try:
