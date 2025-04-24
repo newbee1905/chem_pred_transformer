@@ -154,45 +154,99 @@ class ChemformerTokenizer(SMILESTokenizer):
 	def __call__(
 		self,
 		smiles: Union[str, List[str]],
+		text_target: Optional[Union[str, List[str]]] = None,
 		padding: Union[bool, str] = False,
 		truncation: bool = False,
-		max_length: Optional[int]	 = None,
+		max_length: Optional[int] = None,
 		return_tensors: Optional[str] = None
 	) -> Dict[str, Union[List[List[int]], torch.Tensor]]:
-
+		is_batched = isinstance(smiles, (list, tuple))
+		if not is_batched:
+			smiles = [smiles]
+		
 		encs = self.encode(smiles)
-
+		
+		if truncation and max_length is not None:
+			encs = [enc[:max_length] for enc in encs]
+		
+		encs = [torch.tensor(enc, dtype=torch.long) for enc in encs]
+		
 		pad_to = None
-		if padding == "longest":
-			pad_to = max(len(ids) for ids in encs)
+		if padding == "longest" or padding is True:
+			pad_to = max(len(enc) for enc in encs)
 		elif padding == "max_length":
-			pad_to = max_length or self.max_length
-
-		input_ids		 = []
+			pad_to = max_length or getattr(self, 'max_length', None)
+		
+		input_ids = []
 		attention_mask = []
-
+		
 		for ids in encs:
 			attn = torch.ones_like(ids, dtype=torch.long)
-
+			
 			if pad_to is not None and len(ids) < pad_to:
 				diff = pad_to - len(ids)
-
-				pad_tensor = torch.full((diff,), self.pad_token_id)
+				pad_tensor = torch.full((diff,), self.pad_token_id, dtype=torch.long)
 				mask_pad = torch.zeros(diff, dtype=torch.long)
-
+				
 				ids = torch.cat([ids, pad_tensor])
 				attn = torch.cat([attn, mask_pad])
-
+			
 			input_ids.append(ids)
 			attention_mask.append(attn)
-
+		
 		out = {"input_ids": input_ids, "attention_mask": attention_mask}
-
-		if truncation and len(input_ids) == 1:
+		
+		if text_target is not None:
+			if not isinstance(text_target, (list, tuple)):
+				text_target = [text_target]
+			
+			if len(text_target) == 1 and len(smiles) > 1:
+				text_target = text_target * len(smiles)  # Repeat the single target
+			elif len(text_target) != len(smiles):
+				raise ValueError(
+					f"text_target length {len(text_target)} doesn't match smiles length {len(smiles)}"
+				)
+				
+			target_encs = self.encode(text_target)
+			
+			if truncation and max_length is not None:
+				target_encs = [enc[:max_length] for enc in target_encs]
+			
+			target_encs = [torch.tensor(enc, dtype=torch.long) for enc in target_encs]
+			
+			target_pad_to = None
+			if padding == "longest" or padding is True:
+				target_pad_to = max(len(enc) for enc in target_encs)
+			elif padding == "max_length":
+				target_pad_to = max_length or getattr(self, 'max_length', None)
+			
+			labels = []
+			decoder_attention_mask = []
+			
+			for ids in target_encs:
+				attn = torch.ones_like(ids, dtype=torch.long)
+				
+				if target_pad_to is not None and len(ids) < target_pad_to:
+					diff = target_pad_to - len(ids)
+					pad_tensor = torch.full((diff,), self.pad_token_id, dtype=torch.long)
+					mask_pad = torch.zeros(diff, dtype=torch.long)
+					
+					ids = torch.cat([ids, pad_tensor])
+					attn = torch.cat([attn, mask_pad])
+				
+				labels.append(ids)
+				decoder_attention_mask.append(attn)
+			
+			out["labels"] = labels
+			out["decoder_attention_mask"] = decoder_attention_mask
+		
+		if return_tensors == "pt":
+			out = {k: torch.stack(v) for k, v in out.items()}
+		
+		if not is_batched and return_tensors is None:
 			out = {k: v[0] for k, v in out.items()}
-
+		
 		return out
-
 
 class TokensMasker:
 	"""Base-class for different masking strategies"""
