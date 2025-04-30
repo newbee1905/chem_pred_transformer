@@ -1,12 +1,7 @@
-import time
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader, random_split
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from lightning.pytorch.loggers import TensorBoardLogger
 
 from transformers import PreTrainedTokenizerFast
 from rdkit import Chem
@@ -24,9 +19,10 @@ from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
 
-from transformers import get_cosine_schedule_with_warmup
-
 from utils import is_valid_smiles
+
+import time
+import math
 
 class BARTModel(pl.LightningModule): 
 	def __init__(
@@ -43,7 +39,7 @@ class BARTModel(pl.LightningModule):
 		self.smiles_metric = SMILESEvaluationMetric()
 		self.max_length = model.max_seq_len
 
-		self.mode = "pretrain"
+		self.mode = mode
 		self.sampler = sampler
 		self.kv_cache = kv_cache
 		self.beam_size = beam_size
@@ -125,11 +121,7 @@ class BARTModel(pl.LightningModule):
 
 
 	def test_step(self, batch, batch_idx):
-		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]
-		tgt_padding_mask = batch.get("labels_attention_mask", src_padding_mask)
-
-		src_padding_mask = src_padding_mask.eq(0)
-		tgt_padding_mask = tgt_padding_mask.eq(0)
+		src, tgt = batch["input_ids"], batch["labels"]
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
@@ -147,7 +139,7 @@ class BARTModel(pl.LightningModule):
 
 		if self.sampler == "greedy":
 			generated_tokens = self.model.generate(
-				src, src_padding_mask, greedy_sampler,
+				src, None, greedy_sampler,
 				max_length=self.max_length,
 				start_token_id=self.tokenizer.bos_token_id,
 				end_token_id=self.tokenizer.eos_token_id,
@@ -158,9 +150,12 @@ class BARTModel(pl.LightningModule):
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
+
+			print(ref_smiles_list)
+			print(gen_smiles_list)
 		else:
 			generated_tokens, beam_scores = self.model.generate(
-				src, src_padding_mask, beam_search_sampler,
+				src, None, beam_search_sampler,
 				max_length=self.max_length,
 				start_token_id=self.tokenizer.bos_token_id,
 				end_token_id=self.tokenizer.eos_token_id,
@@ -168,9 +163,13 @@ class BARTModel(pl.LightningModule):
 				# length_penalty_alpha=self.length_penalty_alpha,
 				kv_cache=self.kv_cache,
 			)
-			
+
 			top_beam_tokens = generated_tokens[:, 0, :].cpu()
 			gen_smiles_list = self.tokenizer.batch_decode(top_beam_tokens, skip_special_tokens=True)
+
+			print(gen_smiles_list)
+			print(ref_smiles_list)
+			print("----------------------------------------")
 
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
