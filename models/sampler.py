@@ -57,7 +57,8 @@ def beam_search_sampler(
 	model, memory: torch.Tensor, src_mask: torch.Tensor = None,
 	max_length: int = 256, start_token_id: int = 0,
 	end_token_id: int = 1, beam_size: int = 5,
-	length_penalty_alpha: float = 0.8, kv_cache: bool = False
+	length_penalty_alpha: float = 1, 
+	kv_cache: bool = False,
 ) -> torch.Tensor:
 
 	device = memory.device

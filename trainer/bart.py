@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+from muon import Muon
+
 import lightning.pytorch as pl
 
 from transformers import PreTrainedTokenizerFast
@@ -217,23 +221,51 @@ class BARTModel(pl.LightningModule):
 
 	def configure_optimizers(self):
 		if self.mode == "pretrain":
-			optimizer = torch.optim.AdamW(self.parameters(), lr=1.0, betas=(0.9, 0.999))
+			optimizer = AdamW(self.parameters(), lr=1.0, betas=(0.9, 0.999))
 			d_model = self.model.d_model
 			warmup_steps = 8000
 			lr_lambda = lambda step: (d_model ** -0.5) * min((step + 1) ** (-0.5), (step + 1) * (warmup_steps ** -1.5))
-			scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+			scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
-			optimizer = torch.optim.AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999))
+			muon_params = [p for p in self.parameters() if p.ndim >= 2]
+			adamw_params = [p for p in self.parameters() if p.ndim < 2]
 
-			scheduler = torch.optim.lr_scheduler.OneCycleLR(
-				optimizer,
-				max_lr=5e-5,
-				total_steps=total_steps,
-				pct_start=0.1,         
-				anneal_strategy="cos",
-				div_factor=25.0,       
-				final_div_factor=1e4,  
+			muon_optim = Muon(
+				params=muon_params,
+				lr=5e-5,
+				momentum=0.95,
+				nesterov=True,
+				ns_steps=5,
+				weight_decay=0.01,
+				rank=self.global_rank,
+				world_size=self.world_size,
+			)
+			adamw_optim = AdamW(adamw_params, lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
+
+			# scheduler = OneCycleLR(
+			# 	optimizer,
+			# 	max_lr=5e-5,
+			# 	total_steps=total_steps,
+			# 	pct_start=0.1,
+			# 	anneal_strategy="cos",
+			# 	div_factor=25.0,
+			# 	final_div_factor=1e4,
+			# )
+
+			muon_sched = CosineAnnealingLR(
+				muon_optim,
+				T_max=self.trainer.max_epochs or 1,
+				eta_min=1e-6,
 			)
 
-			return [optimizer], [scheduler]
+			adamw_sched = CosineAnnealingLR(
+				adamw_optim,
+				T_max=self.trainer.max_epochs or 1,
+				eta_min=1e-6,
+			)
+
+			return [muon_optim, adamw_optim], [
+				{"scheduler": muon_sched,  "interval": "step", "opt_idx": 0},
+				{"scheduler": adamw_sched, "interval": "step", "opt_idx": 1},
+			]
