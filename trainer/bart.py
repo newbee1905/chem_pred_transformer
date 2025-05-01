@@ -239,7 +239,7 @@ class BARTModel(pl.LightningModule):
 				ns_steps=5,
 				weight_decay=0.01,
 				rank=self.global_rank,
-				world_size=self.world_size,
+				world_size=self.trainer.world_size,
 			)
 			adamw_optim = AdamW(adamw_params, lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
 
