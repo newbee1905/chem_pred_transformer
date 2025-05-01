@@ -272,7 +272,7 @@ class BARTModel(pl.LightningModule):
 			
 			optim = AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
 			sched = CosineAnnealingLR(
-				adamw_optim,
+				optim,
 				T_max=self.trainer.max_epochs or 1,
 				eta_min=1e-6,
 			)
