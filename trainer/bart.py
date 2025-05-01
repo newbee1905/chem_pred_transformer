@@ -228,20 +228,20 @@ class BARTModel(pl.LightningModule):
 			scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
-			muon_params = [p for p in self.parameters() if p.ndim >= 2]
-			adamw_params = [p for p in self.parameters() if p.ndim < 2]
-
-			muon_optim = Muon(
-				params=muon_params,
-				lr=5e-5,
-				momentum=0.95,
-				nesterov=True,
-				ns_steps=5,
-				weight_decay=0.01,
-				rank=self.global_rank,
-				world_size=self.trainer.world_size,
-			)
-			adamw_optim = AdamW(adamw_params, lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
+			# muon_params = [p for p in self.parameters() if p.ndim >= 2]
+			# adamw_params = [p for p in self.parameters() if p.ndim < 2]
+			#
+			# muon_optim = Muon(
+			# 	params=muon_params,
+			# 	lr=5e-5,
+			# 	momentum=0.95,
+			# 	nesterov=True,
+			# 	ns_steps=5,
+			# 	weight_decay=0.01,
+			# 	rank=self.global_rank,
+			# 	world_size=self.trainer.world_size,
+			# )
+			# adamw_optim = AdamW(adamw_params, lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
 
 			# scheduler = OneCycleLR(
 			# 	optimizer,
@@ -253,19 +253,30 @@ class BARTModel(pl.LightningModule):
 			# 	final_div_factor=1e4,
 			# )
 
-			muon_sched = CosineAnnealingLR(
-				muon_optim,
-				T_max=self.trainer.max_epochs or 1,
-				eta_min=1e-6,
-			)
-
-			adamw_sched = CosineAnnealingLR(
+			# muon_sched = CosineAnnealingLR(
+			# 	muon_optim,
+			# 	T_max=self.trainer.max_epochs or 1,
+			# 	eta_min=1e-6,
+			# )
+			#
+			# adamw_sched = CosineAnnealingLR(
+			# 	adamw_optim,
+			# 	T_max=self.trainer.max_epochs or 1,
+			# 	eta_min=1e-6,
+			# )
+			#
+			# return [muon_optim, adamw_optim], [
+			# 	{"scheduler": muon_sched,  "interval": "step", "opt_idx": 0},
+			# 	{"scheduler": adamw_sched, "interval": "step", "opt_idx": 1},
+			# ]
+			
+			optim = AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
+			sched = CosineAnnealingLR(
 				adamw_optim,
 				T_max=self.trainer.max_epochs or 1,
 				eta_min=1e-6,
 			)
-
-			return [muon_optim, adamw_optim], [
-				{"scheduler": muon_sched,  "interval": "step", "opt_idx": 0},
-				{"scheduler": adamw_sched, "interval": "step", "opt_idx": 1},
+			
+			return [optim], [
+				{"scheduler": sched, "interval": "step"},
 			]
