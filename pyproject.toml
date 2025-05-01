@@ -14,8 +14,12 @@ dependencies = [
     "lightning>=2.5.0.post0",
     "lmdb>=1.6.2",
     "matplotlib>=3.10.1",
+    "muon",
+    "nx>=0.0.0",
     "pandas>=2.2.3",
+    "pyright>=1.1.400",
     "pysmilesutils",
+    "python-lsp-server>=1.12.2",
     "rdkit>=2024.9.6",
     "seaborn>=0.13.2",
     "tensorboard>=2.19.0",
@@ -29,3 +33,4 @@ dependencies = [
 
 [tool.uv.sources]
 pysmilesutils = { git = "https://github.com/MolecularAI/pysmilesutils" }
+muon = { git = "https://github.com/KellerJordan/Muon" }
