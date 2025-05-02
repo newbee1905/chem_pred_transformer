@@ -101,6 +101,7 @@ class BARTModel(pl.LightningModule):
 
 			for name, pred in aux_preds.items():
 				target = batch[f"aux_{name}"].to(pred)
+				print(f"{name}: {pred} - {target}")
 				aux_loss += F.mse_loss(pred, target)
 
 			aux_loss = aux_loss / len(aux_preds)
@@ -148,7 +149,11 @@ class BARTModel(pl.LightningModule):
 
 
 	def test_step(self, batch, batch_idx):
-		src, tgt = batch["input_ids"], batch["labels"]
+		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]
+		tgt_padding_mask = batch.get("labels_attention_mask", src_padding_mask)
+
+		src_padding_mask = src_padding_mask.eq(0)
+		tgt_padding_mask = tgt_padding_mask.eq(0)
 
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
