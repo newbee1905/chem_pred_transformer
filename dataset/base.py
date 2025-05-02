@@ -2,7 +2,9 @@ import torch
 from rdkit import Chem
 from rdkit.Chem import Descriptors, Crippen, rdMolDescriptors, Lipinski
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+
+import pickle
 
 class BARTDataCollator:
 	scalar_props = [
@@ -21,7 +23,7 @@ class BARTDataCollator:
 		"RingCount": rdMolDescriptors.CalcNumRings,
 	}
 
-	def __init__(self, tokenizer, max_length: int = 64, aux_head: bool = False):
+	def __init__(self, tokenizer, max_length: int = 64, aux_head: bool = False, aux_prop_stats_path: Optional[str] = None):
 		self.tokenizer = tokenizer
 		self.max_length = max_length
 
@@ -31,6 +33,33 @@ class BARTDataCollator:
 		self.eos_token = tokenizer.eos_token
 
 		self.aux_head = aux_head
+		self.aux_prop_stats: Optional[Dict] = None
+		if self.aux_head and aux_prop_stats_path:
+			try:
+				with open(aux_prop_stats_path, "rb") as f:
+					self.aux_prop_stats = pickle.load(f)
+			except:
+					self.aux_prop_stats = None
+
+	def _normalize_value(self, value: float, name: str) -> float:
+		if self.aux_prop_stats and name in self.aux_prop_stats:
+			stats = self.aux_prop_stats[name]
+			min_v, max_v = stats.get('min', 0.0), stats.get('max', 1.0)
+
+			if min_v == float('inf') or max_v == float('-inf'):
+				# Return neutral value
+				return 0.5
+
+			range_v = max_v - min_v
+			# Handle constant values or very small range -> neutral value
+			if range_v <= 1e-8:
+				return 0.5
+			else:
+				# Clamp value to the observed min/max range before scaling for robustness
+				clamped_value = max(min_v, min(value, max_v))
+				return (clamped_value - min_v) / range_v
+		else:
+			return value
 
 	def __call__(self, batch: List[Tuple[str, str]]) -> dict[str, torch.Tensor]:
 		inp_smiles, label_smiles = zip(*batch)
@@ -47,12 +76,14 @@ class BARTDataCollator:
 		enc["decoder_attention_mask"] = (enc["labels"] != self.pad_token_id).long()
 
 		if self.aux_head:
-			react_mols = [Chem.MolFromSmiles(s) for s in inp_smiles]
-			prod_mols  = [Chem.MolFromSmiles(s) for s in label_smiles]
+			# removing eos and bos
+			# TODO: find a better method to calculate properties of smiles
+			react_mols = [Chem.MolFromSmiles(s[1:-1].replace(">", ".")) for s in inp_smiles]
+			prod_mols = [Chem.MolFromSmiles(s[1:-1]) for s in label_smiles]
 
 			for side, mols in (("react", react_mols), ("prod", prod_mols)):
 				for name, func in self.prop_funcs.items():
-					vals = [func(m) if m is not None else 0.0 for m in mols]
+					vals = [self._normalize_value(func(m), name) if m is not None else 0 for m in mols]
 					enc[f"aux_{side}_{name}"] = torch.tensor(vals, dtype=torch.float)
 
 		return enc

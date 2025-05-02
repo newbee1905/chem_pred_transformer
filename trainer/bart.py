@@ -101,7 +101,6 @@ class BARTModel(pl.LightningModule):
 
 			for name, pred in aux_preds.items():
 				target = batch[f"aux_{name}"].to(pred)
-				print(f"{name}: {pred} - {target}")
 				aux_loss += F.mse_loss(pred, target)
 
 			aux_loss = aux_loss / len(aux_preds)
