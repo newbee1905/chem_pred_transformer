@@ -18,6 +18,7 @@ class Chemformer(nn.Module):
 		dropout: float = 0.1,
 		norm_layer=nn.LayerNorm,
 		activation: str = "gelu",
+		aux_head: bool = False,
 	):
 		super().__init__()
 
@@ -67,6 +68,25 @@ class Chemformer(nn.Module):
 
 		self.token_fc = nn.Linear(d_model, vocab_size)
 
+		self.aux_head = aux_head
+
+		self.scalar_props = [
+			'MolWt', 'LogP', 'TPSA',
+			'NumHDonors', 'NumHAcceptors',
+			'NumRotatableBonds', 'RingCount'
+		]
+
+		if self.aux_head:
+			self.shared_proj = nn.Sequential(
+				nn.Linear(d_model, d_ff),
+				nn.SiLU(),
+			)
+
+			self.aux_heads = nn.ModuleDict({
+				name: nn.Linear(d_ff, 1)
+				for name in self.scalar_props
+			})
+
 	def encode(self, src: torch.Tensor, src_mask: torch.Tensor = None) -> torch.Tensor:
 		# src: (batch, seq_len) -> (seq_len, batch)
 		src = self.emb(src).transpose(0, 1)
@@ -108,4 +128,20 @@ class Chemformer(nn.Module):
 		decoder_output = self.decode(tgt, memory, tgt_mask, src_mask)
 		logits = self.token_fc(decoder_output)
 
-		return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
+		if not self.aux_head:
+			return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
+
+		tgt_memory = self.encode(tgt, tgt_mask)
+
+		inp_pooled = memory.mean(dim=0)
+		tgt_pooled = tgt_memory.mean(dim=0)
+
+		inp_shared_proj = self.shared_proj(inp_pooled)
+		tgt_shared_proj = self.shared_proj(tgt_pooled)
+
+		aux_preds: Dict[str, torch.Tensor] = {}
+		for name, head in self.aux_heads.items():
+			aux_preds[f"react_{name}"] = head(inp_shared_proj).squeeze(-1)
+			aux_preds[f"prod_{name}"]  = head(tgt_shared_proj).squeeze(-1)
+
+		return logits.transpose(0, 1), aux_preds

@@ -39,7 +39,7 @@ class USPTODataset(Dataset):
 			products_raw	= parts[2].strip()
 
 			if self.mode == "sep":
-				if len(catalyst_raw) > 0 and catalyst_raw is not "":
+				if len(catalyst_raw) > 0 and catalyst_raw != "":
 					reactants_raw = f"{reactants_raw}>{catalyst_raw}"
 			else:
 				new_reactants_raw = f"{reactants_raw}.{catalyst_raw}"

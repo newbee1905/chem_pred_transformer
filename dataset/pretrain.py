@@ -13,7 +13,13 @@ from typing import List, Dict, Tuple
 from dataset.base import BARTDataCollator
 
 class PretrainBARTDataCollator(BARTDataCollator):
-	def __init__(self, tokenizer, max_length: int = 64, noise_prob: float = 0.5, span_lambda: int = 3):
+	def __init__(
+		self,
+		tokenizer,
+		max_length: int = 64,
+		noise_prob: float = 0.5,
+		span_lambda: int = 3,
+	):
 		super().__init__(tokenizer, max_length)
 	
 		self.noise_prob = noise_prob
@@ -27,7 +33,7 @@ class PretrainBARTDataCollator(BARTDataCollator):
 	
 		# Exclude BOS/EOS if they exist and should not be masked
 		if self.tokenizer.bos_token_id is not None:
-			 valid_mask[0] = False
+			valid_mask[0] = False
 		if self.tokenizer.eos_token_id is not None:
 			non_pad_indices = (token_ids != self.pad_token_id).nonzero(as_tuple=True)[0]
 			if len(non_pad_indices) > 0:
@@ -73,17 +79,17 @@ class PretrainBARTDataCollator(BARTDataCollator):
 					break
 
 			if mask_indices:
-				 mask_indices_tensor = torch.tensor(mask_indices, device=token_ids.device, dtype=torch.long)
-				 masked_ids[mask_indices_tensor] = self.mask_token_id
-				 noise_mask[mask_indices_tensor] = True
-				 already_masked[mask_indices_tensor] = True
-				 masked_count += len(mask_indices)
+				mask_indices_tensor = torch.tensor(mask_indices, device=token_ids.device, dtype=torch.long)
+				masked_ids[mask_indices_tensor] = self.mask_token_id
+				noise_mask[mask_indices_tensor] = True
+				already_masked[mask_indices_tensor] = True
+				masked_count += len(mask_indices)
 
 		if masked_count == 0 and len(valid_positions) > 0:
 			random_idx = valid_positions[torch.randint(0, len(valid_positions), (1,)).item()]
 			if not already_masked[random_idx]: # Check just in case
-				 masked_ids[random_idx] = self.mask_token_id
-				 noise_mask[random_idx] = True
+				masked_ids[random_idx] = self.mask_token_id
+				noise_mask[random_idx] = True
 
 		return masked_ids, noise_mask
 
@@ -164,9 +170,9 @@ class PretrainBARTDataset(Dataset):
 			label_smi = org_smi
 		else:
 			try:
-				 inp_smi = Chem.MolToSmiles(mol, doRandom=True, canonical=False)
+				inp_smi = Chem.MolToSmiles(mol, doRandom=True, canonical=False)
 			except Exception:
-				 inp_smi = Chem.MolToSmiles(mol, canonical=True)
+				inp_smi = Chem.MolToSmiles(mol, canonical=True)
 
 			label_smi = Chem.MolToSmiles(mol, canonical=True)
 

@@ -9,9 +9,7 @@ from tokenisers.neochem import ChemformerTokenizerFast
 
 import torch
 from torch.utils.data import DataLoader, random_split
-from dataset.chembl import ChemBL35Dataset, ChemBL35FilteredDataset
-from dataset.uspto import USPTODataset, USPTORetrosynthesisDataset, preprocess_uspto_lmdb
-from dataset.zinc import ZincDataset, load_smiles_by_set, preprocess_zinc_data_splits_lmdb
+from dataset.zinc import load_smiles_by_set
 
 import importlib
 import pickle
@@ -38,7 +36,7 @@ def my_app(cfg : DictConfig) -> None:
 		vocab_size = tokenizer.vocab_size
 	elif cfg.tokenizer.type == "chemformer":
 		tokenizer = ChemformerTokenizerFast(cfg.tokenizer.path)
-		# vocab_size = len(tokenizer)
+		# tokenizer = ChemformerTokenizer(filename=cfg.tokenizer.path)
 		vocab_size = tokenizer.vocab_size
 	else:
 		raise ValueError(f"Tokenizer {cfg.tokenizer.type} is not supported")
@@ -140,7 +138,7 @@ def my_app(cfg : DictConfig) -> None:
 
 	model = instantiate(cfg.model, vocab_size=vocab_size, max_seq_len=max_length, max_batch_size=cfg.batch_size)
 	if "pretrained_state_dict" in cfg:
-		model.load_state_dict(torch.load(cfg.pretrained_state_dict))
+		model.load_state_dict(torch.load(cfg.pretrained_state_dict), strict=False)
 	print(model)
 	module_kwargs = filter_none_kwargs(
 		kv_cache=cfg.get("kv_cache"),

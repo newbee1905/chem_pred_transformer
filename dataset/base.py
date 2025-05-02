@@ -1,10 +1,27 @@
 import torch
 from rdkit import Chem
+from rdkit.Chem import Descriptors, Crippen, rdMolDescriptors, Lipinski
 
 from typing import List, Tuple
 
 class BARTDataCollator:
-	def __init__(self, tokenizer, max_length: int = 64):
+	scalar_props = [
+		"MolWt", "LogP", "TPSA",
+		"NumHDonors", "NumHAcceptors",
+		"NumRotatableBonds", "RingCount"
+	]
+
+	prop_funcs = {
+		"MolWt": Descriptors.MolWt,
+		"LogP": Crippen.MolLogP,
+		"TPSA": rdMolDescriptors.CalcTPSA,
+		"NumHDonors": Lipinski.NumHDonors,
+		"NumHAcceptors": Lipinski.NumHAcceptors,
+		"NumRotatableBonds": Lipinski.NumRotatableBonds,
+		"RingCount": rdMolDescriptors.CalcNumRings,
+	}
+
+	def __init__(self, tokenizer, max_length: int = 64, aux_head: bool = False):
 		self.tokenizer = tokenizer
 		self.max_length = max_length
 
@@ -12,6 +29,8 @@ class BARTDataCollator:
 		self.mask_token_id = tokenizer.mask_token_id
 		self.bos_token = tokenizer.bos_token
 		self.eos_token = tokenizer.eos_token
+
+		self.aux_head = aux_head
 
 	def __call__(self, batch: List[Tuple[str, str]]) -> dict[str, torch.Tensor]:
 		inp_smiles, label_smiles = zip(*batch)
@@ -27,9 +46,13 @@ class BARTDataCollator:
 
 		enc["decoder_attention_mask"] = (enc["labels"] != self.pad_token_id).long()
 
-		return {
-			"input_ids": enc["input_ids"],
-			"attention_mask": enc["attention_mask"],
-			"labels": enc["labels"],
-			"labels_attention_mask": enc["decoder_attention_mask"],
-		}
+		if self.aux_head:
+			react_mols = [Chem.MolFromSmiles(s) for s in inp_smiles]
+			prod_mols  = [Chem.MolFromSmiles(s) for s in label_smiles]
+
+			for side, mols in (("react", react_mols), ("prod", prod_mols)):
+				for name, func in self.prop_funcs.items():
+					vals = [func(m) if m is not None else 0.0 for m in mols]
+					enc[f"aux_{side}_{name}"] = torch.tensor(vals, dtype=torch.float)
+
+		return enc

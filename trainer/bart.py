@@ -3,17 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
-from muon import Muon
 
 import lightning.pytorch as pl
 
-from transformers import PreTrainedTokenizerFast
-from rdkit import Chem
-
-import torchmetrics
-from torchmetrics.text.bleu import BLEUScore
-
-from einops import rearrange, repeat
+from einops import rearrange
 
 from typing import Optional, Tuple
 
@@ -49,7 +42,12 @@ class BARTModel(pl.LightningModule):
 		self.beam_size = beam_size
 
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
-		return self.model(src, tgt, src_mask, tgt_mask)
+		out = self.model(src, tgt, src_mask, tgt_mask)
+		if self.model.aux_head:
+			logits, aux_preds = out
+		else:
+			logits, aux_preds = out, {}
+		return logits, aux_preds
 
 	def _calc_loss(self, tgt: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
 		# Remove the first token (BOS) from both target and logits.
@@ -93,10 +91,23 @@ class BARTModel(pl.LightningModule):
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 		target = tgt[:, 1:]
 
-		logits = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
+		logits, aux_preds = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
 		loss = self._calc_loss(tgt, logits)
 
 		self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+
+		if aux_preds:
+			aux_loss = 0.0
+
+			for name, pred in aux_preds.items():
+				target = batch[f"aux_{name}"].to(pred)
+				aux_loss += F.mse_loss(pred, target)
+
+			aux_loss = aux_loss / len(aux_preds)
+			loss = loss + aux_loss
+
+			self.log("t_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
+
 		return loss
 
 	def validation_step(self, batch, batch_idx):
@@ -109,7 +120,7 @@ class BARTModel(pl.LightningModule):
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 
-		logits = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
+		logits, aux_preds = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
 		loss = self._calc_loss(tgt, logits)
 
 		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
@@ -117,6 +128,18 @@ class BARTModel(pl.LightningModule):
 		self.log("val_loss", loss, prog_bar=True, sync_dist=True)
 		self.log("v_top1", top1_acc, prog_bar=True, sync_dist=True)
 		self.log("v_top5", top5_acc, prog_bar=True, sync_dist=True)
+
+		if aux_preds:
+			aux_loss = 0.0
+
+			for name, pred in aux_preds.items():
+				target = batch[f"aux_{name}"].to(pred)
+				aux_loss += F.mse_loss(pred, target)
+
+			aux_loss = aux_loss / len(aux_preds)
+			loss = loss + aux_loss
+
+			self.log("v_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 
 		return loss
 
@@ -130,7 +153,7 @@ class BARTModel(pl.LightningModule):
 		bos = torch.full((tgt.size(0), 1), self.tokenizer.bos_token_id, device=self.device, dtype=torch.long)
 		decoder_input = torch.cat([bos, tgt[:, :-1]], dim=1)
 
-		logits = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
+		logits, aux_preds = self(src, decoder_input, src_padding_mask, tgt_padding_mask)
 		loss = self._calc_loss(tgt, logits)
 
 		top1_acc, top5_acc = self._calc_token_acc(tgt, logits)
@@ -138,6 +161,19 @@ class BARTModel(pl.LightningModule):
 		self.log("test_loss", loss, prog_bar=True, sync_dist=True)
 		self.log("t_top1", top1_acc, prog_bar=True, sync_dist=True)
 		self.log("t_top5", top5_acc, prog_bar=True, sync_dist=True)
+
+		if aux_preds:
+			aux_loss = 0.0
+
+			for name, pred in aux_preds.items():
+				target = batch[f"aux_{name}"].to(pred)
+				aux_loss += F.mse_loss(pred, target)
+
+			aux_loss = aux_loss / len(aux_preds)
+			loss = loss + aux_loss
+
+			self.log("t_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
+
 
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 
@@ -228,48 +264,6 @@ class BARTModel(pl.LightningModule):
 			scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
-			# muon_params = [p for p in self.parameters() if p.ndim >= 2]
-			# adamw_params = [p for p in self.parameters() if p.ndim < 2]
-			#
-			# muon_optim = Muon(
-			# 	params=muon_params,
-			# 	lr=5e-5,
-			# 	momentum=0.95,
-			# 	nesterov=True,
-			# 	ns_steps=5,
-			# 	weight_decay=0.01,
-			# 	rank=self.global_rank,
-			# 	world_size=self.trainer.world_size,
-			# )
-			# adamw_optim = AdamW(adamw_params, lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
-
-			# scheduler = OneCycleLR(
-			# 	optimizer,
-			# 	max_lr=5e-5,
-			# 	total_steps=total_steps,
-			# 	pct_start=0.1,
-			# 	anneal_strategy="cos",
-			# 	div_factor=25.0,
-			# 	final_div_factor=1e4,
-			# )
-
-			# muon_sched = CosineAnnealingLR(
-			# 	muon_optim,
-			# 	T_max=self.trainer.max_epochs or 1,
-			# 	eta_min=1e-6,
-			# )
-			#
-			# adamw_sched = CosineAnnealingLR(
-			# 	adamw_optim,
-			# 	T_max=self.trainer.max_epochs or 1,
-			# 	eta_min=1e-6,
-			# )
-			#
-			# return [muon_optim, adamw_optim], [
-			# 	{"scheduler": muon_sched,  "interval": "step", "opt_idx": 0},
-			# 	{"scheduler": adamw_sched, "interval": "step", "opt_idx": 1},
-			# ]
-			
 			optim = AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
 			sched = CosineAnnealingLR(
 				optim,
