@@ -26,7 +26,9 @@ class BARTModel(pl.LightningModule):
 			self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer,
 			mode: str = "pretrain",
 			sampler: str = "greedy", kv_cache: bool = False,
-			beam_size: int = 10,
+			beam_size: int = 20,
+			aux_warmup_epochs: int = 10,
+			aux_weight_max: int = 0.1,
 		):
 		super().__init__()
 		self.model = model
@@ -40,6 +42,9 @@ class BARTModel(pl.LightningModule):
 		self.sampler = sampler
 		self.kv_cache = kv_cache
 		self.beam_size = beam_size
+
+		self.aux_warmup_epochs = aux_warmup_epochs
+		self.aux_weight_max = aux_weight_max
 
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
 		out = self.model(src, tgt, src_mask, tgt_mask)
@@ -98,13 +103,17 @@ class BARTModel(pl.LightningModule):
 
 		if aux_preds:
 			aux_loss = 0.0
+			epoch = float(self.current_epoch)
+			N = float(self.aux_warmup_epochs)
+			alpha = min(1.0, epoch / N)
+			aux_weight = alpha * self.aux_weight_max
 
 			for name, pred in aux_preds.items():
 				target = batch[f"aux_{name}"].to(pred)
 				aux_loss += F.mse_loss(pred, target)
 
 			aux_loss = aux_loss / len(aux_preds)
-			loss = loss + aux_loss
+			loss = loss + aux_weight * aux_loss
 
 			self.log("t_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 
@@ -264,11 +273,26 @@ class BARTModel(pl.LightningModule):
 			optimizer = AdamW(self.parameters(), lr=1.0, betas=(0.9, 0.999))
 			d_model = self.model.d_model
 			warmup_steps = 8000
-			lr_lambda = lambda step: (d_model ** -0.5) * min((step + 1) ** (-0.5), (step + 1) * (warmup_steps ** -1.5))
+			lr_lambda = lambda step: (d_model ** -0.5) * min(
+				(step + 1) ** (-0.5),
+				(step + 1) * (warmup_steps ** -1.5)
+			)
 			scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
-			optim = AdamW(self.parameters(), lr=5e-5, betas=(0.9, 0.999), weight_decay=0.01)
+			main_params = []
+			aux_params  = []
+			for name, p in self.model.named_parameters():
+				if "aux_heads" in name or "shared_proj" in name:
+					aux_params.append(p)
+				else:
+					main_params.append(p)
+
+			optim = AdamW([
+				{"params": main_params, "lr": 5e-5},
+				{"params": aux_params,  "lr": 5e-4},
+			], betas=(0.9, 0.999), weight_decay=0.01)
+
 			sched = CosineAnnealingLR(
 				optim,
 				T_max=self.trainer.max_epochs or 1,
