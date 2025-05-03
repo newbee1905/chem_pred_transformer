@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR
 
 import lightning.pytorch as pl
 
@@ -282,16 +282,35 @@ class BARTModel(pl.LightningModule):
 		else:
 			main_params = []
 			aux_params  = []
-			for name, p in self.model.named_parameters():
+			for name, p in self.named_parameters():
 				if "aux_heads" in name or "shared_proj" in name:
 					aux_params.append(p)
 				else:
 					main_params.append(p)
 
 			optim = AdamW([
-				{"params": main_params, "lr": 5e-5},
-				{"params": aux_params,  "lr": 5e-4},
-			], betas=(0.9, 0.999), weight_decay=0.01)
+				{"params": main_params, "lr": 5e-5, "weight_decay": 0.01},
+				{"params": aux_params,  "lr": 1e-4, "weight_decay": 0.0},
+			], betas=(0.9, 0.999))
+
+
+			warmup_steps = 1000
+			def warmup_fn(step: int):
+				return min(1.0, step / warmup_steps)
+
+			warmup_sched = LambdaLR(optim, lr_lambda=warmup_fn)
+
+			cosine_sched = CosineAnnealingLR(
+				optim,
+				T_max=self.trainer.max_epochs or 1,
+				eta_min=1e-6,
+			)
+
+			sched = SequentialLR(
+				optim,
+				schedulers=[warmup_sched, cosine_sched],
+				milestones=[warmup_steps],
+			)
 
 			sched = CosineAnnealingLR(
 				optim,
