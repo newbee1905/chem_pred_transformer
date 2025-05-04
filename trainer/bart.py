@@ -228,25 +228,15 @@ class BARTModel(pl.LightningModule):
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
 			
-			if self.beam_size >= 5:
-				top5_correct = 0
+			for top_n in range(5, self.beam_size + 1, 5):
+				top_n_correct = 0
 				for i, ref in enumerate(ref_smiles_list):
-					top5_beams = generated_tokens[i, :5, :].cpu()
-					top5_smiles = self.tokenizer.batch_decode(top5_beams, skip_special_tokens=True)
-					if ref in top5_smiles:
-						top5_correct += 1
-				top5_accuracy = top5_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
-				self.log("t_smi_top5", top5_accuracy, prog_bar=True, sync_dist=True)
-			
-			if self.beam_size >= 10:
-				top10_correct = 0
-				for i, ref in enumerate(ref_smiles_list):
-					top10_beams = generated_tokens[i, :10, :].cpu()
-					top10_smiles = self.tokenizer.batch_decode(top10_beams, skip_special_tokens=True)
-					if ref in top10_smiles:
-						top10_correct += 1
-				top10_accuracy = top10_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
-				self.log("t_smi_top10", top10_accuracy, prog_bar=True, sync_dist=True)
+					top_n_beams = generated_tokens[i, :top_n, :].cpu()
+					top_n_smiles = self.tokenizer.batch_decode(top_n_beams, skip_special_tokens=True)
+					if ref in top_n_smiles:
+						top_n_correct += 1
+				top_n_accuracy = top_n_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+				self.log(f"t_smi_top{top_n}", top_n_accuracy, prog_bar=True, sync_dist=True)
 			
 			self.log("t_beam_scores", beam_scores[:, 0].mean(), prog_bar=False, sync_dist=True)
 
