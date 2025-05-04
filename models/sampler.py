@@ -29,7 +29,7 @@ def greedy_sampler(
 			tgt_mask=None,
 			memory_mask=src_mask,
 			kv_write_indices=write_idx,
-			start_pos=t,
+			start_pos=start_pos,
 		)
 
 		last_dec = dec[-1, :, :] if kv_cache else dec[-1]
@@ -134,7 +134,7 @@ def beam_search_sampler(
 	)
 	lengths = eos_positions.min(dim=-1).values + 1
 
-	penalty = ((5 + lengths).float() / 6) ** length_penalty_alpha
+	penalty = length ** length_penalty_alpha
 	norm_scores = beam_scores / penalty
 
 	sorted_scores, sort_indices = torch.sort(norm_scores, dim=1, descending=True)
