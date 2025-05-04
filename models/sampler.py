@@ -134,8 +134,21 @@ def beam_search_sampler(
 	)
 	lengths = eos_positions.min(dim=-1).values + 1
 
-	penalty = length ** length_penalty_alpha
-	norm_scores = beam_scores / penalty
+	"""
+	Based on Chemformer normalise method
+
+	Normalise log-likelihoods using the length of the constructed sequence
+
+	Equation from:
+	Wu, Yonghui, et al.
+	"Google's neural machine translation system: Bridging the gap between human and machine translation."
+	arXiv preprint arXiv:1609.08144 (2016).
+	"""
+	if length_penalty_alpha and length_penalty_alpha > 0:
+		penalty = torch.pow((5.0 + lengths) ** length_penalty_alpha) / (6.0 ** length_penalty_alpha)
+		norm_scores = beam_scores / penalty
+	else:
+		norm_scores = beam_scores
 
 	sorted_scores, sort_indices = torch.sort(norm_scores, dim=1, descending=True)
 	sorted_sequences = torch.gather(sequences, 1, sort_indices.unsqueeze(-1).expand_as(sequences))
