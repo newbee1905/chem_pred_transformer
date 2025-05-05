@@ -27,8 +27,9 @@ class BARTModel(pl.LightningModule):
 			mode: str = "pretrain",
 			sampler: str = "greedy", kv_cache: bool = False,
 			beam_size: int = 20,
-			aux_warmup_epochs: int = 10,
-			aux_weight_max: int = 0.1,
+			# aux_warmup_epochs: int = 10,
+			aux_warmup_steps: int = 2000,
+			aux_weight_max: float = 0.1,
 		):
 		super().__init__()
 		self.model = model
@@ -43,8 +44,13 @@ class BARTModel(pl.LightningModule):
 		self.kv_cache = kv_cache
 		self.beam_size = beam_size
 
-		self.aux_warmup_epochs = aux_warmup_epochs
+		# self.aux_warmup_epochs = aux_warmup_epochs
+		self.aux_warmup_steps = aux_warmup_steps
 		self.aux_weight_max = aux_weight_max
+
+		self.aux_loss_fn = nn.GaussianNLLLoss(full=True, eps=1e-6)
+
+		# self.automatic_optimization = False
 
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
 		out = self.model(src, tgt, src_mask, tgt_mask)
@@ -102,20 +108,31 @@ class BARTModel(pl.LightningModule):
 		self.log("train_loss", loss, prog_bar=True, sync_dist=True)
 
 		if aux_preds:
-			aux_loss = 0.0
-			epoch = float(self.current_epoch)
-			N = float(self.aux_warmup_epochs)
-			alpha = min(1.0, epoch / N)
+			# epoch = float(self.current_epoch)
+			# N = float(self.aux_warmup_epochs)
+			# alpha = min(1.0, epoch / N)
+			# aux_weight = alpha * self.aux_weight_max
+			step = float(self.global_step)
+			warmup_steps = self.aux_warmup_steps * self.trainer.num_training_batches
+			alpha = min(1.0, step / warmup_steps)
 			aux_weight = alpha * self.aux_weight_max
 
-			for name, pred in aux_preds.items():
-				target = batch[f"aux_{name}"].to(pred)
-				aux_loss += F.mse_loss(pred, target)
+			targets = torch.stack(
+				[batch[f"aux_{name}"].to(pred) for name, pred in aux_preds.items()],
+				dim=1,
+			).to(self.device)
 
-			aux_loss = aux_loss / len(aux_preds)
+			preds = torch.stack(list(aux_preds.values()), dim=1)
+			# expand to match batch_size and repeat for react and pred
+			bsz, K = preds.size()
+			logvars = torch.exp(self.model.aux_logvars)
+			logvars = logvars.repeat(2)
+			logvars = logvars.unsqueeze(0).expand(bsz, K)
+
+			aux_loss = self.aux_loss_fn(preds, targets, logvars)
+
+			self.log("train_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 			loss = loss + aux_weight * aux_loss
-
-			self.log("t_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 
 		return loss
 
@@ -139,14 +156,19 @@ class BARTModel(pl.LightningModule):
 		self.log("v_top5", top5_acc, prog_bar=True, sync_dist=True)
 
 		if aux_preds:
-			aux_loss = 0.0
+			targets = torch.stack(
+				[batch[f"aux_{name}"].to(pred) for name, pred in aux_preds.items()],
+				dim=1,
+			).to(self.device)
 
-			for name, pred in aux_preds.items():
-				target = batch[f"aux_{name}"].to(pred)
-				aux_loss += F.mse_loss(pred, target)
+			preds = torch.stack(list(aux_preds.values()), dim=1)
+			# expand to match batch_size and repeat for react and pred
+			bsz, K = preds.size()
+			logvars = torch.exp(self.model.aux_logvars)
+			logvars = logvars.repeat(2)
+			logvars = logvars.unsqueeze(0).expand(bsz, K)
 
-			aux_loss = aux_loss / len(aux_preds)
-			loss = loss + aux_loss
+			aux_loss = self.aux_loss_fn(preds, targets, logvars)
 
 			self.log("v_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 
@@ -176,17 +198,23 @@ class BARTModel(pl.LightningModule):
 		self.log("t_top5", top5_acc, prog_bar=True, sync_dist=True)
 
 		if aux_preds:
-			aux_loss = 0.0
+			targets = torch.stack(
+				[batch[f"aux_{name}"].to(pred) for name, pred in aux_preds.items()],
+				dim=1,
+			).to(self.device)
 
-			for name, pred in aux_preds.items():
-				target = batch[f"aux_{name}"].to(pred)
-				aux_loss += F.mse_loss(pred, target)
+			preds = torch.stack(list(aux_preds.values()), dim=1)
+
+			bsz, K = preds.size()
+			# expand to match batch_size and repeat for react and pred
+			logvars = torch.exp(self.model.aux_logvars)
+			logvars = logvars.repeat(2)
+			logvars = logvars.unsqueeze(0).expand(bsz, K)
+
+			aux_loss = self.aux_loss_fn(preds, targets, logvars)
 
 			aux_loss = aux_loss / len(aux_preds)
-			loss = loss + aux_loss
-
-			self.log("t_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
-
+			self.log("v_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 
@@ -271,16 +299,16 @@ class BARTModel(pl.LightningModule):
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
 			main_params = []
-			aux_params  = []
+			aux_params = []
 			for name, p in self.named_parameters():
-				if "aux_heads" in name or "shared_proj" in name:
+				if "aux" in name or "shared_proj" in name:
 					aux_params.append(p)
 				else:
 					main_params.append(p)
 
 			optim = AdamW([
 				{"params": main_params, "lr": 5e-5, "weight_decay": 0.01},
-				{"params": aux_params,  "lr": 1e-4, "weight_decay": 0.0},
+				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
 
@@ -302,12 +330,6 @@ class BARTModel(pl.LightningModule):
 				milestones=[warmup_steps],
 			)
 
-			sched = CosineAnnealingLR(
-				optim,
-				T_max=self.trainer.max_epochs or 1,
-				eta_min=1e-6,
-			)
-			
 			return [optim], [
 				{"scheduler": sched, "interval": "step"},
 			]

@@ -41,25 +41,12 @@ class BARTDataCollator:
 			except:
 					self.aux_prop_stats = None
 
-	def _normalize_value(self, value: float, name: str) -> float:
-		if self.aux_prop_stats and name in self.aux_prop_stats:
-			stats = self.aux_prop_stats[name]
-			min_v, max_v = stats.get('min', 0.0), stats.get('max', 1.0)
+	def _normalize_value(self, value: float, name: str, eps: float = 1e-6) -> float:
+		# Z-score normalisation 
+		mean = self.aux_prop_stats[name]['mean']	
+		std = self.aux_prop_stats[name]['std']	
 
-			if min_v == float('inf') or max_v == float('-inf'):
-				# Return neutral value
-				return 0.5
-
-			range_v = max_v - min_v
-			# Handle constant values or very small range -> neutral value
-			if range_v <= 1e-8:
-				return 0.5
-			else:
-				# Clamp value to the observed min/max range before scaling for robustness
-				clamped_value = max(min_v, min(value, max_v))
-				return (clamped_value - min_v) / range_v
-		else:
-			return value
+		return (value - mean) / (std + eps)
 
 	def __call__(self, batch: List[Tuple[str, str]]) -> dict[str, torch.Tensor]:
 		inp_smiles, label_smiles = zip(*batch)

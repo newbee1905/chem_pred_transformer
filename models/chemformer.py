@@ -7,10 +7,10 @@ import torch.nn.functional as F
 
 from typing import Optional
 
-from models.transformer import DecoderLayer, EncoderLayer
 from models.positional_encoding import SinusoidalPositionalEncoding
+from models.base import Base
 
-class Chemformer(nn.Module):
+class Chemformer(Base):
 	def __init__(
 		self, vocab_size: int,
 		d_model: int = 768, n_heads: int = 12, n_layers: int = 6,
@@ -20,74 +20,28 @@ class Chemformer(nn.Module):
 		activation: str = "gelu",
 		aux_head: bool = False,
 	):
-		super().__init__()
-
-		self.vocab_size = vocab_size
-		self.d_model = d_model
-		self.max_seq_len = max_seq_len
-
-		self.emb = nn.Embedding(vocab_size, d_model)
-		self.dropout = nn.Dropout(dropout)
-
-		self.n_heads = n_heads
-		self.n_layers = n_layers
-		self.d_ff = d_ff
-		self.head_dim = d_model // n_heads
+		super().__init__(
+			vocab_size=vocab_size,
+			d_model=d_model,
+			n_heads=n_heads,
+			n_layers=n_layers,
+			d_ff=d_ff,
+			max_seq_len=max_seq_len,
+			max_batch_size=max_batch_size,
+			dropout=dropout,
+			use_layerscale=False,
+			norm_layer=norm_layer,
+			activation=activation,
+			aux_head=aux_head,
+		)
 
 		self.pos_encoder = SinusoidalPositionalEncoding(d_model)
 
-		self.enc_layers = nn.ModuleList([
-			EncoderLayer(
-				d_model,
-				n_heads,
-				d_ff,
-				dropout, 
-				use_layerscale=False, 
-				norm_layer=norm_layer,
-				activation=activation,
-				max_seq_len=max_seq_len,
-				max_batch_size=max_batch_size,
-			)
-			for _ in range(n_layers)
-		])
-
-		self.dec_layers = nn.ModuleList([
-			DecoderLayer(
-				d_model,
-				n_heads,
-				d_ff,
-				dropout, 
-				use_layerscale=False, 
-				norm_layer=norm_layer,
-				activation=activation,
-				max_seq_len=max_seq_len,
-				max_batch_size=max_batch_size,
-			)
-			for _ in range(n_layers)
-		])
-
-		self.token_fc = nn.Linear(d_model, vocab_size)
-
-		self.aux_head = aux_head
-
-		self.scalar_props = [
-			'MolWt', 'LogP', 'TPSA',
-			'NumHDonors', 'NumHAcceptors',
-			'NumRotatableBonds', 'RingCount'
-		]
-
-		if self.aux_head:
-			self.shared_proj = nn.Sequential(
-				nn.Linear(d_model, d_ff),
-				nn.SiLU(),
-			)
-
-			self.aux_heads = nn.ModuleDict({
-				name: nn.Linear(d_ff, 1)
-				for name in self.scalar_props
-			})
-
-	def encode(self, src: torch.Tensor, src_mask: torch.Tensor = None) -> torch.Tensor:
+	def encode(
+		self,
+		src: torch.Tensor,
+		src_mask: Optional[torch.Tensor] = None,
+	) -> torch.Tensor:
 		# src: (batch, seq_len) -> (seq_len, batch)
 		src = self.emb(src).transpose(0, 1)
 		src = self.pos_encoder(src)
@@ -99,7 +53,7 @@ class Chemformer(nn.Module):
 
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
-		tgt_mask: torch.Tensor = None, memory_mask: torch.Tensor = None,
+		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
 		kv_write_indices: Optional[torch.Tensor] = None,
 		start_pos: int = 0,
 	) -> torch.Tensor:
@@ -111,37 +65,3 @@ class Chemformer(nn.Module):
 			tgt = layer(tgt, memory, tgt_mask, memory_mask)
 
 		return tgt
-
-	def generate(
-		self, src: torch.Tensor, src_mask: torch.Tensor, sampler,
-		max_length: int = 50, **sampler_kwargs
-	) -> torch.Tensor:
-		"""Generate full text using an external sampler."""
-		memory = self.encode(src, src_mask)
-		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
-
-	def forward(
-		self, src: torch.Tensor, tgt: torch.Tensor,
-		src_mask: torch.Tensor = None, tgt_mask: torch.Tensor = None,
-	) -> torch.Tensor:
-		memory = self.encode(src, src_mask)
-		decoder_output = self.decode(tgt, memory, tgt_mask, src_mask)
-		logits = self.token_fc(decoder_output)
-
-		if not self.aux_head:
-			return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
-
-		tgt_memory = self.encode(tgt, tgt_mask)
-
-		inp_pooled = memory.mean(dim=0)
-		tgt_pooled = tgt_memory.mean(dim=0)
-
-		inp_shared_proj = self.shared_proj(inp_pooled)
-		tgt_shared_proj = self.shared_proj(tgt_pooled)
-
-		aux_preds: Dict[str, torch.Tensor] = {}
-		for name, head in self.aux_heads.items():
-			aux_preds[f"react_{name}"] = head(inp_shared_proj).squeeze(-1)
-			aux_preds[f"prod_{name}"]  = head(tgt_shared_proj).squeeze(-1)
-
-		return logits.transpose(0, 1), aux_preds
