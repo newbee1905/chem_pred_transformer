@@ -7,13 +7,13 @@ from rdkit.Chem import Descriptors, Crippen, rdMolDescriptors, Lipinski
 
 # property functions
 prop_funcs = {
-	"MolWt":							 Descriptors.MolWt,
-	"LogP":								Crippen.MolLogP,
-	"TPSA":								rdMolDescriptors.CalcTPSA,
-	"NumHDonors":					Lipinski.NumHDonors,
-	"NumHAcceptors":			 Lipinski.NumHAcceptors,
-	"NumRotatableBonds":	 Lipinski.NumRotatableBonds,
-	"RingCount":					 rdMolDescriptors.CalcNumRings,
+	"MolWt": Descriptors.MolWt,
+	"LogP": Crippen.MolLogP,
+	"TPSA": rdMolDescriptors.CalcTPSA,
+	"NumHDonors": Lipinski.NumHDonors,
+	"NumHAcceptors": Lipinski.NumHAcceptors,
+	"NumRotatableBonds": Lipinski.NumRotatableBonds,
+	"RingCount": rdMolDescriptors.CalcNumRings,
 }
 
 def process_mol(mol):
@@ -44,12 +44,12 @@ def main():
 
 	# init stats
 	stats = {
-		name: {"min": float("inf"), "max": float("-inf"), "sum": 0.0, "count": 0}
+		name: {"min": float("inf"), "max": float("-inf"), "sum": 0.0, "count": 0, "std": 0}
 		for name in prop_funcs
 	}
 
 	# parallelise
-	pool = mp.Pool(4)
+	pool = mp.Pool(mp.cpu_count() - 2)
 	try:
 		for props in tqdm(pool.imap_unordered(process_mol, mols),
 											total=len(mols),
@@ -61,6 +61,7 @@ def main():
 				s["min"] = min(s["min"], val)
 				s["max"] = max(s["max"], val)
 				s["sum"] += val
+				s["sum_sq"] += val * val
 				s["count"]+= 1
 	finally:
 		pool.close()
@@ -69,8 +70,15 @@ def main():
 	# finalise means, drop sums
 	for name, s in stats.items():
 		if s["count"] > 0:
-			s["mean"] = s["sum"] / s["count"]
+			mean = s["sum"] / s["count"]
+			var = s["sum_sq"] / s["count"] - mean * mean
+			std = math.sqrt(var) if var > 0 else 0.0
+
+			s["mean"] = mean
+			s["std"] = std
+
 		del s["sum"]
+		del s["sum_sq"]
 
 	# save as pickle
 	with open("aux_prop_stats.pickle", "wb") as f:
