@@ -44,7 +44,7 @@ def main():
 
 	# init stats
 	stats = {
-		name: {"min": float("inf"), "max": float("-inf"), "sum": 0.0, "count": 0, "std": 0}
+		name: {"min": float("inf"), "max": float("-inf"), "sum": 0.0, "sum_sq": 0.0, "count": 0, "std": 0}
 		for name in prop_funcs
 	}
 
