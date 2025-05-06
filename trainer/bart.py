@@ -28,7 +28,7 @@ class BARTModel(pl.LightningModule):
 			sampler: str = "greedy", kv_cache: bool = False,
 			beam_size: int = 20,
 			# aux_warmup_epochs: int = 10,
-			aux_warmup_steps: int = 2000,
+			aux_warmup_steps: int = 10000,
 			aux_weight_max: float = 0.1,
 		):
 		super().__init__()
@@ -48,7 +48,7 @@ class BARTModel(pl.LightningModule):
 		self.aux_warmup_steps = aux_warmup_steps
 		self.aux_weight_max = aux_weight_max
 
-		self.aux_loss_fn = nn.GaussianNLLLoss(full=True, eps=1e-6)
+		self.aux_loss_fn = nn.GaussianNLLLoss(full=False, eps=1e-6)
 
 		# self.automatic_optimization = False
 
