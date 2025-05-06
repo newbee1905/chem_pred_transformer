@@ -70,3 +70,12 @@ class BART(Base):
 			)
 
 		return tgt
+
+	def forward(
+		self, src: torch.Tensor, tgt: torch.Tensor,
+		src_mask: Optional[torch.Tensor] = None, tgt_mask: Optional[torch.Tensor] = None,
+	) -> torch.Tensor | Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+		if self.freqs_cis.device != src.device:
+			self.freqs_cis = self.freqs_cis.to(src.device)
+
+		return super().forward(src, tgt, src_mask, tgt_mask)
