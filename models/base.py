@@ -145,27 +145,27 @@ class Base(nn.Module):
 		if not self.aux_head:
 			return logits.transpose(0, 1)	# (batch, seq_len, vocab_size)
 
-		tgt_memory = self.encode(tgt, tgt_mask)
+		# tgt_memory = self.encode(tgt, tgt_mask)
 
 		inp_pooled = self.attn_pool(memory, src_mask)
-		tgt_pooled = self.attn_pool(tgt_memory, tgt_mask)
+		# tgt_pooled = self.attn_pool(tgt_memory, tgt_mask)
 
 		inp_shared_proj = self.shared_proj(inp_pooled)
-		tgt_shared_proj = self.shared_proj(tgt_pooled)
+		# tgt_shared_proj = self.shared_proj(tgt_pooled)
 
 		inp_aux_out = self.aux_out(inp_shared_proj)
 		inp_aux_skip = self.aux_skip(inp_shared_proj)
 
-		tgt_aux_out = self.aux_out(tgt_shared_proj)
-		tgt_aux_skip = self.aux_skip(tgt_shared_proj)
+		# tgt_aux_out = self.aux_out(tgt_shared_proj)
+		# tgt_aux_skip = self.aux_skip(tgt_shared_proj)
 
 		gate = torch.sigmoid(self.aux_gate)
 		aux_react = gate * inp_aux_out + (1 - gate) * inp_aux_skip
-		aux_prod = gate * tgt_aux_out + (1 - gate) * tgt_aux_skip
+		# aux_prod = gate * tgt_aux_out + (1 - gate) * tgt_aux_skip
 
 		aux_preds: Dict[str, torch.Tensor] = {}
 		for i, name in enumerate(self.scalar_props):
 			aux_preds[f"react_{name}"] = aux_react[:, i]
-			aux_preds[f"prod_{name}"] = aux_prod[:, i]
+			# aux_preds[f"prod_{name}"] = aux_prod[:, i]
 
 		return logits.transpose(0, 1), aux_preds

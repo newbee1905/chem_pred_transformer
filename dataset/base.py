@@ -66,9 +66,10 @@ class BARTDataCollator:
 			# removing eos and bos
 			# TODO: find a better method to calculate properties of smiles
 			react_mols = [Chem.MolFromSmiles(s[1:-1].replace(">", ".")) for s in inp_smiles]
-			prod_mols = [Chem.MolFromSmiles(s[1:-1]) for s in label_smiles]
+			# prod_mols = [Chem.MolFromSmiles(s[1:-1]) for s in label_smiles]
 
-			for side, mols in (("react", react_mols), ("prod", prod_mols)):
+			# for side, mols in (("react", react_mols), ("prod", prod_mols)):
+			for side, mols in (("react", react_mols), ):
 				for name, func in self.prop_funcs.items():
 					vals = [self._normalize_value(func(m), name) if m is not None else 0 for m in mols]
 					enc[f"aux_{side}_{name}"] = torch.tensor(vals, dtype=torch.float)

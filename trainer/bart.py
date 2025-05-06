@@ -126,7 +126,7 @@ class BARTModel(pl.LightningModule):
 			# expand to match batch_size and repeat for react and pred
 			bsz, K = preds.size()
 			logvars = torch.exp(self.model.aux_logvars)
-			logvars = logvars.repeat(2)
+			# logvars = logvars.repeat(2)
 			logvars = logvars.unsqueeze(0).expand(bsz, K)
 
 			aux_loss = self.aux_loss_fn(preds, targets, logvars)
@@ -165,7 +165,7 @@ class BARTModel(pl.LightningModule):
 			# expand to match batch_size and repeat for react and pred
 			bsz, K = preds.size()
 			logvars = torch.exp(self.model.aux_logvars)
-			logvars = logvars.repeat(2)
+			# logvars = logvars.repeat(2)
 			logvars = logvars.unsqueeze(0).expand(bsz, K)
 
 			aux_loss = self.aux_loss_fn(preds, targets, logvars)
@@ -208,7 +208,7 @@ class BARTModel(pl.LightningModule):
 			bsz, K = preds.size()
 			# expand to match batch_size and repeat for react and pred
 			logvars = torch.exp(self.model.aux_logvars)
-			logvars = logvars.repeat(2)
+			# logvars = logvars.repeat(2)
 			logvars = logvars.unsqueeze(0).expand(bsz, K)
 
 			aux_loss = self.aux_loss_fn(preds, targets, logvars)
