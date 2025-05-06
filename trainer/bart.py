@@ -307,7 +307,7 @@ class BARTModel(pl.LightningModule):
 					main_params.append(p)
 
 			optim = AdamW([
-				{"params": main_params, "lr": 5e-5, "weight_decay": 0.01},
+				{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
 				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
@@ -320,7 +320,7 @@ class BARTModel(pl.LightningModule):
 
 			cosine_sched = CosineAnnealingLR(
 				optim,
-				T_max=self.trainer.max_epochs or 1,
+				T_max=self.trainer.estimated_stepping_batches,
 				eta_min=1e-6,
 			)
 
