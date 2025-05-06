@@ -145,7 +145,7 @@ def beam_search_sampler(
 	arXiv preprint arXiv:1609.08144 (2016).
 	"""
 	if length_penalty_alpha and length_penalty_alpha > 0:
-		penalty = torch.pow((5.0 + lengths) ** length_penalty_alpha) / (6.0 ** length_penalty_alpha)
+		penalty = torch.pow((5.0 + lengths), length_penalty_alpha) / (6.0 ** length_penalty_alpha)
 		norm_scores = beam_scores / penalty
 	else:
 		norm_scores = beam_scores
