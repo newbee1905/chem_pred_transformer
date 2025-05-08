@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR, OneCycleLR
 
 import lightning.pytorch as pl
 
