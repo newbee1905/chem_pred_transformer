@@ -18,6 +18,8 @@ from metrics import SMILESEvaluationMetric
 
 from utils import is_valid_smiles
 
+import sys
+from pprint import pprint
 import time
 import math
 
@@ -47,6 +49,7 @@ class BARTModel(pl.LightningModule):
 		# self.aux_warmup_epochs = aux_warmup_epochs
 		self.aux_warmup_steps = aux_warmup_steps
 		self.aux_weight_max = aux_weight_max
+		self.aux_weight = 0 
 
 		self.aux_loss_fn = nn.GaussianNLLLoss(full=False, eps=1e-6)
 
@@ -108,14 +111,10 @@ class BARTModel(pl.LightningModule):
 		self.log("train_loss", loss, prog_bar=True, sync_dist=True)
 
 		if aux_preds:
-			# epoch = float(self.current_epoch)
-			# N = float(self.aux_warmup_epochs)
-			# alpha = min(1.0, epoch / N)
-			# aux_weight = alpha * self.aux_weight_max
 			step = float(self.global_step)
 			warmup_steps = self.aux_warmup_steps * self.trainer.num_training_batches
 			alpha = min(1.0, step / warmup_steps)
-			aux_weight = alpha * self.aux_weight_max
+			self.aux_weight = alpha * self.aux_weight_max
 
 			targets = torch.stack(
 				[batch[f"aux_{name}"].to(pred) for name, pred in aux_preds.items()],
@@ -132,7 +131,8 @@ class BARTModel(pl.LightningModule):
 			aux_loss = self.aux_loss_fn(preds, targets, logvars)
 
 			self.log("train_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
-			loss = loss + aux_weight * aux_loss
+			loss = loss + self.aux_weight * aux_loss
+			self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		return loss
 
@@ -171,12 +171,10 @@ class BARTModel(pl.LightningModule):
 			aux_loss = self.aux_loss_fn(preds, targets, logvars)
 
 			self.log("v_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
+			loss = loss + self.aux_weight * aux_loss
+			self.log("v_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		return loss
-
-	def on_validation_epoch_end(self):
-		pass
-
 
 	def test_step(self, batch, batch_idx):
 		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]
@@ -228,6 +226,9 @@ class BARTModel(pl.LightningModule):
 			)
 			generated_tokens = generated_tokens.cpu()
 			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+			pprint(gen_smiles_list, stream=sys.stderr)
+			pprint(ref_smiles_list, stream=sys.stderr)
+			print("----------------------------------------", file=sys.stderr)
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
@@ -248,9 +249,9 @@ class BARTModel(pl.LightningModule):
 			top_beam_tokens = generated_tokens[:, 0, :].cpu()
 			gen_smiles_list = self.tokenizer.batch_decode(top_beam_tokens, skip_special_tokens=True)
 
-			print(gen_smiles_list)
-			print(ref_smiles_list)
-			print("----------------------------------------")
+			pprint(gen_smiles_list, stream=sys.stderr)
+			pprint(ref_smiles_list, stream=sys.stderr)
+			print("----------------------------------------", file=sys.stderr)
 
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
@@ -308,26 +309,18 @@ class BARTModel(pl.LightningModule):
 
 			optim = AdamW([
 				{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
-				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
+				{"params": aux_params, "lr": 5e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
 
-			warmup_steps = 1000
-			def warmup_fn(step: int):
-				return min(1.0, step / warmup_steps)
-
-			warmup_sched = LambdaLR(optim, lr_lambda=warmup_fn)
-
-			cosine_sched = CosineAnnealingLR(
+			total_steps = self.trainer.estimated_stepping_batches
+			sched = OneCycleLR(
 				optim,
-				T_max=self.trainer.estimated_stepping_batches,
-				eta_min=1e-6,
-			)
-
-			sched = SequentialLR(
-				optim,
-				schedulers=[warmup_sched, cosine_sched],
-				milestones=[warmup_steps],
+				max_lr=1e-3,
+				total_steps=total_steps,
+				pct_start=0.1,
+				anneal_strategy="cos",
+				final_div_factor=1e4,
 			)
 
 			return [optim], [
