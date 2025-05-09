@@ -202,17 +202,17 @@ class BARTModel(pl.LightningModule):
 			).to(self.device)
 
 			preds = torch.stack(list(aux_preds.values()), dim=1)
-
-			bsz, K = preds.size()
 			# expand to match batch_size and repeat for react and pred
+			bsz, K = preds.size()
 			logvars = torch.exp(self.model.aux_logvars)
 			# logvars = logvars.repeat(2)
 			logvars = logvars.unsqueeze(0).expand(bsz, K)
 
 			aux_loss = self.aux_loss_fn(preds, targets, logvars)
 
-			aux_loss = aux_loss / len(aux_preds)
-			self.log("v_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
+			self.log("t_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
+			loss = loss + self.aux_weight * aux_loss
+			self.log("t_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 

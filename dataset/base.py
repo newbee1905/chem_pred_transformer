@@ -60,7 +60,7 @@ class BARTDataCollator:
 			return_tensors="pt",
 		)
 
-		enc["decoder_attention_mask"] = (enc["labels"] != self.pad_token_id).long()
+		enc["labels_attention_mask"] = (enc["labels"] != self.pad_token_id).long()
 
 		if self.aux_head:
 			# removing eos and bos
