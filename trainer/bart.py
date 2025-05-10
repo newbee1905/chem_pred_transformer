@@ -324,7 +324,7 @@ class BARTModel(pl.LightningModule):
 			# 	final_div_factor=1e4,
 			# )
 			num_cycles  = 3
-			t0 = total_steps // num_cycles
+			t_0 = total_steps // num_cycles
 			sched = lr_scheduler.CosineAnnealingWarmRestarts(
 				optim,
 				T_0=t_0,
