@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR, OneCycleLR
+# from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR, OneCycleLR
+from torch.optim import lr_scheduler
 
 import lightning.pytorch as pl
 
@@ -314,13 +315,20 @@ class BARTModel(pl.LightningModule):
 
 
 			total_steps = self.trainer.estimated_stepping_batches
-			sched = OneCycleLR(
+			# sched = lr_scheduler.OneCycleLR(
+			# 	optim,
+			# 	max_lr=1e-3,
+			# 	total_steps=total_steps,
+			# 	pct_start=0.1,
+			# 	anneal_strategy="cos",
+			# 	final_div_factor=1e4,
+			# )
+			num_cycles  = 3
+			t0 = total_steps // num_cycles
+			sched = lr_scheduler.CosineAnnealingWarmRestarts(
 				optim,
-				max_lr=1e-3,
-				total_steps=total_steps,
-				pct_start=0.1,
-				anneal_strategy="cos",
-				final_div_factor=1e4,
+				T_0=t_0,
+				eta_min=1e-6,
 			)
 
 			return [optim], [
