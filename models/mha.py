@@ -99,12 +99,21 @@ class KVCacheMHA(nn.Module):
 				other_type=None,
 				other_name=None,
 				target_type=query.dtype,
-			).unsqueeze(1).unsqueeze(2)
+			).unsqueeze(1).unsqueeze(2) # (bsz, 1, 1, seq_len)
+
+		if is_causal:
+			causal = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=q.device))
+			causal = causal.unsqueeze(0).unsqueeze(0)
+
+			if attn_mask is None:
+				attn_mask = causal
+			else:
+				attn_mask = attn_mask.expand(-1, -1, seq_len, -1).bool() & causal
 
 		attn_output = F.scaled_dot_product_attention(
 			q, key, value,
 			attn_mask=attn_mask, dropout_p=self.p,
-			scale=self.scaling, is_causal=is_causal
+			scale=self.scaling, is_causal=False,
 		)
 		attn_output = attn_output.permute(2, 0, 1, 3).reshape(seq_len, bsz, self.d_model)
 

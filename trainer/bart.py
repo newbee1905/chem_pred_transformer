@@ -302,14 +302,18 @@ class BARTModel(pl.LightningModule):
 		else:
 			main_params = []
 			aux_params = []
+			no_decay = []
 			for name, p in self.named_parameters():
 				if "aux" in name or "shared_proj" in name:
 					aux_params.append(p)
+				elif "bias" in name or "norm" in name:
+					no_decay.append(p)
 				else:
 					main_params.append(p)
 
 			optim = AdamW([
 				{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
+				{"params": no_decay, "lr": 5e-4, "weight_decay": 0.0},
 				{"params": aux_params, "lr": 5e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
