@@ -93,22 +93,25 @@ class KVCacheMHA(nn.Module):
 			value = v
 
 		if attn_mask is not None:
+			attn_mask = attn_mask.unsqueeze(1).unsqueeze(1)
+
+		if is_causal:
+			causal_mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=q.device))
+			causal_mask = (~causal_mask).unsqueeze(0).unsqueeze(0) # True means MASK (future tokens)
+
+			if attn_mask is None:
+				attn_mask = causal_mask
+			else:
+				attn_mask = attn_mask | causal_mask
+
+		if attn_mask is not None:
 			attn_mask = F._canonical_mask(
 				mask=attn_mask,
 				mask_name="attn_mask",
 				other_type=None,
 				other_name=None,
 				target_type=query.dtype,
-			).unsqueeze(1).unsqueeze(2) # (bsz, 1, 1, seq_len)
-
-		if is_causal:
-			causal = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=q.device))
-			causal = causal.unsqueeze(0).unsqueeze(0)
-
-			if attn_mask is None:
-				attn_mask = causal
-			else:
-				attn_mask = attn_mask.expand(-1, -1, seq_len, -1).bool() & causal
+			)
 
 		attn_output = F.scaled_dot_product_attention(
 			q, key, value,
