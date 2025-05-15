@@ -175,7 +175,41 @@ class BARTModel(pl.LightningModule):
 			loss = loss + self.aux_weight * aux_loss
 			self.log("v_total_loss", loss, prog_bar=True, sync_dist=True)
 
+		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
+
+		generated_tokens = self.model.generate(
+			src, None, greedy_sampler,
+			max_length=self.max_length,
+			start_token_id=self.tokenizer.bos_token_id,
+			end_token_id=self.tokenizer.eos_token_id,
+			kv_cache=self.kv_cache,
+		)
+		generated_tokens = generated_tokens.cpu()
+		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+		pprint(gen_smiles_list, stream=sys.stderr)
+		pprint(ref_smiles_list, stream=sys.stderr)
+		print("----------------------------------------", file=sys.stderr)
+		smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
+		smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+		self.log("v_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
+
+		self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
+		torch.cuda.empty_cache()
+
 		return loss
+
+	def on_validation_epoch_end(self):
+		scores = self.smiles_metric.compute()
+
+		self.log_dict({
+			"v_valid": scores["valid_smiles_ratio"],
+			"v_tanimoto": scores["avg_tanimoto"],
+			"v_unique": scores["unique_ratio"],
+			"v_dup_ratio": scores["duplicate_ratio"],
+			"v_dup_count": scores["duplicate_count"],
+		}, prog_bar=True, sync_dist=True)
+
+		self.smiles_metric.reset()
 
 	def test_step(self, batch, batch_idx):
 		src, src_padding_mask, tgt = batch["input_ids"], batch["attention_mask"], batch["labels"]

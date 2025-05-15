@@ -1,6 +1,6 @@
 defaults:
   - dataset: uspto
-  - tokenizer: hf
+  - tokenizer: chemformer
   - model: chemformer
   - module: bart
   - _self_
@@ -8,15 +8,15 @@ defaults:
 seed: 24
 train_split: 0.99
 
-batch_size: 8
-num_workers: 8
+batch_size: 128
+num_workers: 16
 # ckpt_path: "train_checkpoints-server/best-checkpoint-filtered-chembl-v1.ckpt"
 pth_path: ""
 
 callbacks:
   - _target_: lightning.pytorch.callbacks.EarlyStopping
     monitor: "val_loss"
-    patience: 5
+    patience: 10
     verbose: true
     min_delta: 0.001
     mode: "min"
@@ -25,6 +25,13 @@ callbacks:
     monitor: "val_loss"
     dirpath: "train_checkpoints"
     filename: "best-checkpoint-pretrain-zinc-neochem"
+    save_top_k: 1
+    mode: "min"
+
+  - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    monitor: "v_tanimoto"
+    dirpath: "train_checkpoints"
+    filename: "best-checkpoint-pretrain-zinc-neochem-tanimoto"
     save_top_k: 1
     mode: "min"
 
@@ -50,13 +57,13 @@ trainer:
   # max_epochs: 50
   # max_steps: 1000000
   # val_check_interval: 10000
-  max_steps: 10000
-  val_check_interval: 5000
-  precision: "16-mixed"
+  # max_steps: 10000
+  # val_check_interval: 5000
+  precision: "bf16-mixed"
   gradient_clip_val: 1.0
   # log_every_n_steps: 50
   # accumulate_grad_batches: 1
-  # limit_train_batches: 0.0001
+  limit_train_batches: 0.1
   limit_val_batches: 0.1
   # limit_test_batches: 0.0001
 
