@@ -312,27 +312,20 @@ class BARTModel(pl.LightningModule):
 					main_params.append(p)
 
 			optim = AdamW([
-				{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
-				{"params": no_decay, "lr": 5e-4, "weight_decay": 0.0},
+				{"params": main_params, "lr": 1e-3, "weight_decay": 0.01},
+				{"params": no_decay, "lr": 1e-3, "weight_decay": 0.0},
 				{"params": aux_params, "lr": 5e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
 
 			total_steps = self.trainer.estimated_stepping_batches
-			# sched = lr_scheduler.OneCycleLR(
-			# 	optim,
-			# 	max_lr=1e-3,
-			# 	total_steps=total_steps,
-			# 	pct_start=0.1,
-			# 	anneal_strategy="cos",
-			# 	final_div_factor=1e4,
-			# )
-			num_cycles  = 3
-			t_0 = total_steps // num_cycles
-			sched = lr_scheduler.CosineAnnealingWarmRestarts(
+			sched = lr_scheduler.OneCycleLR(
 				optim,
-				T_0=t_0,
-				eta_min=1e-6,
+				max_lr=[1e-3, 1e-3, 5e-3],
+				total_steps=total_steps,
+				pct_start=0.1,
+				anneal_strategy="cos",
+				final_div_factor=1e4,
 			)
 
 			return [optim], [
