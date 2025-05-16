@@ -172,6 +172,11 @@ def my_app(cfg : DictConfig) -> None:
 		trainer.test(module, test_dl, **trainer_kwargs)
 	else:
 		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
+    if "pth_path" in cfg:
+			best = ckpt.best_model_path
+			sd = torch.load(best, map_location="cpu")["state_dict"]
+			torch.save(sd, cfg.pth_path)
+			print(f"Best model weights saved to {cfg.pth_path} (from {best})")
 
 if __name__ == "__main__":
 	from rdkit import RDLogger
