@@ -141,15 +141,9 @@ class BARTModel(pl.LightningModule):
 			# self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		if self.rl_coef > 0:
-			idx = torch.randint(0, src.size(0), (1,)).item()
-
-			src_i = src[idx:idx+1] 
-			tgt_i = src[idx:idx+1]
-			mask_i = src_padding_mask[idx:idx+1]
-
 			with torch.no_grad():
 				generated_tokens, log_pi = self.model.generate(
-					src_i, mask_i, greedy_sampler,
+					src, src_padding_mask, greedy_sampler,
 					max_length=self.max_length,
 					start_token_id=self.tokenizer.bos_token_id,
 					end_token_id=self.tokenizer.eos_token_id,
@@ -157,7 +151,7 @@ class BARTModel(pl.LightningModule):
 					return_logpi=True,
 				) 
 
-			ref_smiles_list = self.tokenizer.batch_decode(tgt_i, skip_special_tokens=True)
+			ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 
 			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
