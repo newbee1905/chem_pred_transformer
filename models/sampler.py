@@ -190,13 +190,17 @@ def nucleus_sampler(
 
 	for t in range(max_length - 1):
 		start_pos = t if kv_cache else 0
+		input_ids = generated[:, -1:] if kv_cache else generated
+
 		dec = model.decode(
-			generated,
+			input_ids,
 			memory,
 			tgt_mask=None,
 			memory_mask=src_mask,
-			kv_cache=kv_cache, start_pos=start_pos
+			kv_cache=kv_cache,
+			start_pos=start_pos,
 		)
+
 		last_dec = dec[-1] if not kv_cache else dec[-1, :, :]
 		logits = model.token_fc(last_dec) / temperature
 

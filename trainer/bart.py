@@ -12,7 +12,7 @@ from einops import rearrange
 from typing import Optional, Tuple
 
 from models.bart import BART
-from models.sampler import greedy_sampler, beam_search_sampler
+from models.sampler import greedy_sampler, beam_search_sampler, nucleus_sampler
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 from metrics import SMILESEvaluationMetric
@@ -143,7 +143,7 @@ class BARTModel(pl.LightningModule):
 		if self.rl_coef > 0:
 			with torch.no_grad():
 				generated_tokens, log_pi = self.model.generate(
-					src, src_padding_mask, greedy_sampler,
+					src, src_padding_mask, nucleus_sampler,
 					max_length=self.max_length,
 					start_token_id=self.tokenizer.bos_token_id,
 					end_token_id=self.tokenizer.eos_token_id,
