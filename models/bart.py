@@ -55,7 +55,8 @@ class BART(Base):
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
 		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
-		kv_write_indices: Optional[torch.Tensor] = None,
+		# kv_write_indices: Optional[torch.Tensor] = None,
+		kv_cache: bool = False,
 		start_pos: int = 0,
 	) -> torch.Tensor:
 		# tgt: (batch, seq_len) -> (seq_len, batch)
@@ -65,7 +66,8 @@ class BART(Base):
 			tgt = layer(
 				tgt, memory, tgt_mask, memory_mask,
 				freqs_cis=self.freqs_cis,
-				kv_write_indices=kv_write_indices,
+				# kv_write_indices=kv_write_indices,
+				kv_cache=kv_cache,
 				start_pos=start_pos,
 			)
 
@@ -79,3 +81,12 @@ class BART(Base):
 			self.freqs_cis = self.freqs_cis.to(src.device)
 
 		return super().forward(src, tgt, src_mask, tgt_mask)
+
+	def generate(
+		self, src: torch.Tensor, src_mask: torch.Tensor, sampler,
+		max_length: int = 50, **sampler_kwargs
+	) -> torch.Tensor:
+		if self.freqs_cis.device != src.device:
+			self.freqs_cis = self.freqs_cis.to(src.device)
+
+		return super().generate(src, src_mask, sampler, max_length, **sampler_kwargs)

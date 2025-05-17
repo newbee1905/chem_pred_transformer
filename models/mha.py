@@ -27,7 +27,7 @@ class KVCacheMHA(nn.Module):
 		self.out_proj = nn.Linear(d_model, d_model)
 		self.p = dropout
 
-		cache_dtype = next(self.parameters()).dtype
+		# cache_dtype = next(self.parameters()).dtype
 
 		# self.register_buffer(
 		# 	"cache_k",
@@ -43,17 +43,19 @@ class KVCacheMHA(nn.Module):
 		self.register_buffer("cache_k", None, persistent=False)
 		self.register_buffer("cache_v", None, persistent=False)
 
+	def clear_cache(self):
+		self.cache_k = None
+		self.cache_v = None
 
 	def forward(
 		self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
 		attn_mask: torch.Tensor = None, is_causal: bool = False,
-		kv_write_indices: torch.Tensor = None,
+		# kv_write_indices: torch.Tensor = None,
+		kv_cache: bool = False,
 		start_pos: int = 0,
 		freqs_cis: torch.Tensor = None,
 		**kwargs,
 	) -> torch.Tensor:
-
-
 		# query, key, value: (seq_len, bsz, d_model)
 		seq_len, bsz, _ = query.size()
 		k_seq_len = key.size(0)
@@ -70,24 +72,29 @@ class KVCacheMHA(nn.Module):
 			q = apply_rotary_emb(q, freqs_cis, start_pos, seq_len)
 			k = apply_rotary_emb(k, freqs_cis, start_pos, k_seq_len)
 
-		if kv_write_indices is not None:
+		if kv_cache:
 			if self.cache_k is None:
 				self.cache_k = torch.zeros(
 					self.max_batch_size, self.n_heads, self.max_seq_len, self.head_dim,
 					device=k.device, dtype=k.dtype
 				)
 				self.cache_v = torch.zeros(
-					self.max_batch_size, self.n_heads, self.max_seq_len , self.head_dim,
+					self.max_batch_size, self.n_heads, self.max_seq_len, self.head_dim,
 					device=v.device, dtype=v.dtype
 				)
 
+			end_pos = start_pos + k_seq_len
+
 			# k and v are of shape (bsz, n_heads, seq_len, head_dim).
 			# Update along the seq_len dimension (dim=2).
-			self.cache_k[:bsz].index_copy_(2, kv_write_indices, k)
-			self.cache_v[:bsz].index_copy_(2, kv_write_indices, v)
+			with torch.no_grad():
+				self.cache_k[:bsz, :, start_pos:end_pos, :] = k
+				self.cache_v[:bsz, :, start_pos:end_pos, :] = v
 
-			key = self.cache_k[:bsz, :, : k_seq_len, :]
-			value = self.cache_v[:bsz, :, : k_seq_len, :]
+			key = self.cache_k[:bsz, :, :k_seq_len, :]
+			value = self.cache_v[:bsz, :, :k_seq_len, :]
+
+			del k, v
 		else:
 			key = k
 			value = v

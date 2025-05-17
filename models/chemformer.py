@@ -54,7 +54,7 @@ class Chemformer(Base):
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
 		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
-		kv_write_indices: Optional[torch.Tensor] = None,
+		kv_cache: bool = False,
 		start_pos: int = 0,
 	) -> torch.Tensor:
 		# tgt_tokens: (batch, seq_len) -> (seq_len, batch)
@@ -62,6 +62,6 @@ class Chemformer(Base):
 		tgt = self.pos_encoder(tgt)
 
 		for layer in self.dec_layers:
-			tgt = layer(tgt, memory, tgt_mask, memory_mask)
+			tgt = layer(tgt, memory, tgt_mask, memory_mask, kv_cache=kv_cache, start_pos=start_pos)
 
 		return tgt

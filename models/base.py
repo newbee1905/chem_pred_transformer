@@ -106,16 +106,27 @@ class Base(nn.Module):
 	def decode(
 		self, tgt: torch.Tensor, memory: torch.Tensor,
 		tgt_mask: Optional[torch.Tensor] = None, memory_mask: Optional[torch.Tensor] = None,
-		kv_write_indices: Optional[torch.Tensor] = None,
+		# kv_write_indices: Optional[torch.Tensor] = None,
+		kv_cache: bool = False,
 		start_pos: int = 0,
 	) -> torch.Tensor:
 		raise NotImplementedError
+
+
+	def clear_cache(self):
+		for layer in self.enc_layers:
+			layer.self_attn.clear_cache()
+
+		for layer in self.dec_layers:
+			layer.self_attn.clear_cache()
+			layer.cross_attn.clear_cache()
 
 	def generate(
 		self, src: torch.Tensor, src_mask: torch.Tensor, sampler,
 		max_length: int = 50, **sampler_kwargs
 	) -> torch.Tensor:
 		"""Generate full text using an external sampler."""
+		self.clear_cache()
 		memory = self.encode(src, src_mask)
 
 		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
