@@ -167,6 +167,8 @@ class BARTModel(pl.LightningModule):
 
 			self.baseline = 0.9 * self.baseline + 0.1 * reward.item()
 			rl_loss = -(reward - self.baseline) * log_pi.mean()
+
+			reward = reward.to(src.device)
 			rl_loss = rl_loss.to(src.device)
 
 			self.log("train_rl_loss", rl_loss, prog_bar=True, sync_dist=True)
