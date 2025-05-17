@@ -8,6 +8,7 @@ def greedy_sampler(
 	max_length: int = 50, start_token_id: int = 0,
 	end_token_id: int = 1,
 	kv_cache: bool = False,
+	return_logpi: bool = False,
 ) -> torch.Tensor:
 	"""Greedy decoding sampler."""
 
@@ -20,15 +21,19 @@ def greedy_sampler(
 	)
 	finished = torch.zeros(bsz, dtype=torch.bool, device=device)
 
+	if return_logpi:
+		log_pi = torch.zeros(bsz, device=torch.device("cpu"))
+
 	for t in range(max_length - 1):
-		write_idx = torch.arange(t + 1, device=device) if kv_cache else None
 		start_pos = t if kv_cache else 0
+		input_ids = generated[:, -1:] if kv_cache else generated
+
 		dec = model.decode(
-			generated,
+			input_ids,
 			memory,
 			tgt_mask=None,
 			memory_mask=src_mask,
-			kv_write_indices=write_idx,
+			kv_cache=kv_cache,
 			start_pos=start_pos,
 		)
 
@@ -45,13 +50,19 @@ def greedy_sampler(
 			next_token,
 		)
 
+		if return_logpi:
+			log_pi += log_probs.gather(1, next_token).squeeze(1).to(torch.device("cpu"))
+
 		generated = torch.cat([generated, next_token], dim=1)
 
 		finished |= (next_token.squeeze(-1) == end_token_id)
 		if finished.all():
 			break
 
-	return generated
+	if not return_logpi:
+		return generated
+
+	return generated, log_pi
 
 def beam_search_sampler(
 	model, memory: torch.Tensor, src_mask: torch.Tensor = None,
@@ -82,14 +93,16 @@ def beam_search_sampler(
 	finished = finished.view(bsz, beam_size)
 
 	for t in range(max_length - 1):
-		write_idx = torch.arange(t + 1, device=device) if kv_cache else None
 		start_pos = t if kv_cache else 0
 
-		flat_sequences = sequences.view(bsz * beam_size, -1)
+		if kv_cache:
+			flat_sequences = sequences[:, :, -1:].reshape(bsz * beam_size, 1)
+		else:
+			flat_sequences = sequences.view(bsz * beam_size, -1)
 
 		dec = model.decode(
 			flat_sequences, memory, tgt_mask=None, memory_mask=src_mask,
-			kv_write_indices=write_idx, start_pos=start_pos
+			kv_cache=kv_cache, start_pos=start_pos
 		)
 
 		last_dec = dec[-1, :, :] if kv_cache else dec[-1]
@@ -154,3 +167,68 @@ def beam_search_sampler(
 	sorted_sequences = torch.gather(sequences, 1, sort_indices.unsqueeze(-1).expand_as(sequences))
 
 	return sorted_sequences, sorted_scores
+
+def nucleus_sampler(
+	model,
+	memory: torch.Tensor,
+	src_mask: torch.Tensor = None,
+	max_length: int = 50,
+	start_token_id: int = 0,
+	end_token_id: int = 1,
+	kv_cache: bool = False,
+	return_logpi: bool = False,
+	top_p: float = 0.9,
+	temperature: float = 1.0,
+) -> torch.Tensor:
+	"""Nucleus (top-p) sampling: dynamic cutoff by cumulative probability."""
+	device = memory.device
+	bsz = memory.size(1)
+	generated = torch.full((bsz, 1), start_token_id, device=device, dtype=torch.long)
+	finished = torch.zeros(bsz, dtype=torch.bool, device=device)
+	if return_logpi:
+		log_pi = torch.zeros(bsz, device='cpu')
+
+	for t in range(max_length - 1):
+		start_pos = t if kv_cache else 0
+		dec = model.decode(
+			generated,
+			memory,
+			tgt_mask=None,
+			memory_mask=src_mask,
+			kv_cache=kv_cache, start_pos=start_pos
+		)
+		last_dec = dec[-1] if not kv_cache else dec[-1, :, :]
+		logits = model.token_fc(last_dec) / temperature
+
+		# sort logits descending, compute softmax probabilities
+		sorted_logits, sorted_idx = torch.sort(logits, descending=True, dim=-1)
+		cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+		# keep tokens up to top_p
+		cutoff = cum_probs > top_p
+		cutoff[..., 1:] &= ~cutoff[..., :-1]
+		keep = ~cutoff
+		# mask tokens beyond nucleus
+		mask = torch.full_like(logits, float('-inf'))
+		mask.scatter_(1, sorted_idx, sorted_logits.masked_fill(~keep, float('-inf')))
+		probs = F.softmax(mask, dim=-1)
+
+		next_token = torch.multinomial(probs, num_samples=1)
+		if return_logpi:
+			log_pi += torch.log(probs.gather(1, next_token).squeeze(1)).to('cpu')
+
+		next_token = torch.where(
+			finished.unsqueeze(-1),
+			torch.tensor(end_token_id, device=device),
+			next_token,
+		)
+
+		generated = torch.cat([generated, next_token], dim=1)
+		finished |= (next_token.squeeze(-1) == end_token_id)
+		if finished.all():
+			break
+
+	if not return_logpi:
+		return generated
+
+	return generated, log_pi
