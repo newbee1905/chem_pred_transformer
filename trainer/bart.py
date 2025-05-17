@@ -33,6 +33,7 @@ class BARTModel(pl.LightningModule):
 			# aux_warmup_epochs: int = 10,
 			aux_warmup_steps: int = 10000,
 			aux_weight_max: float = 0.1,
+			rl_coef: float = 0.1,
 		):
 		super().__init__()
 		self.model = model
@@ -54,7 +55,11 @@ class BARTModel(pl.LightningModule):
 
 		self.aux_loss_fn = nn.GaussianNLLLoss(full=False, eps=1e-6)
 
+		self.rl_coef = rl_coef
+		self.baseline = 0.0
+
 		# self.automatic_optimization = False
+
 
 	def forward(self, src, tgt, src_mask = None, tgt_mask = None):
 		out = self.model(src, tgt, src_mask, tgt_mask)
@@ -133,6 +138,42 @@ class BARTModel(pl.LightningModule):
 
 			self.log("train_aux_loss", aux_loss, prog_bar=True, sync_dist=True)
 			loss = loss + self.aux_weight * aux_loss
+			# self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
+
+		if self.rl_coef > 0:
+			idx = torch.randint(0, src.size(0), (1,)).item()
+
+			src_i = src[idx:idx+1] 
+			tgt_i = src[idx:idx+1]
+			mask_i = src_padding_mask[idx:idx+1]
+
+			with torch.no_grad():
+				generated_tokens, log_pi = self.model.generate(
+					src_i, mask_i, greedy_sampler,
+					max_length=self.max_length,
+					start_token_id=self.tokenizer.bos_token_id,
+					end_token_id=self.tokenizer.eos_token_id,
+					kv_cache=self.kv_cache,
+					return_logpi=True,
+				) 
+
+			ref_smiles_list = self.tokenizer.batch_decode(tgt_i, skip_special_tokens=True)
+			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+
+			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
+
+			metrics = self.smiles_metric.compute_once(gen_smiles_list, ref_smiles_list)
+			reward = torch.tensor(metrics["avg_tanimoto"])
+
+			self.baseline = 0.9 * self.baseline + 0.1 * reward.item()
+			rl_loss = -(reward - self.baseline) * log_pi.mean()
+
+			self.log("train_rl_loss", rl_loss, prog_bar=True, sync_dist=True)
+			self.log("train_reward", reward, prog_bar=True, sync_dist=True)
+
+			loss = loss + self.rl_coef * rl_loss
+
+		if aux_preds or self.rl_coef > 0:
 			self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		return loss
@@ -178,7 +219,7 @@ class BARTModel(pl.LightningModule):
 		ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 
 		generated_tokens = self.model.generate(
-			src, None, greedy_sampler,
+			src, src_padding_mask, greedy_sampler,
 			max_length=self.max_length,
 			start_token_id=self.tokenizer.bos_token_id,
 			end_token_id=self.tokenizer.eos_token_id,
@@ -253,7 +294,7 @@ class BARTModel(pl.LightningModule):
 
 		if self.sampler == "greedy":
 			generated_tokens = self.model.generate(
-				src, None, greedy_sampler,
+				src, src_padding_mask, greedy_sampler,
 				max_length=self.max_length,
 				start_token_id=self.tokenizer.bos_token_id,
 				end_token_id=self.tokenizer.eos_token_id,
@@ -272,7 +313,7 @@ class BARTModel(pl.LightningModule):
 			print(gen_smiles_list)
 		else:
 			generated_tokens, beam_scores = self.model.generate(
-				src, None, beam_search_sampler,
+				src, src_padding_mask, beam_search_sampler,
 				max_length=self.max_length,
 				start_token_id=self.tokenizer.bos_token_id,
 				end_token_id=self.tokenizer.eos_token_id,
@@ -353,20 +394,21 @@ class BARTModel(pl.LightningModule):
 
 
 			total_steps = self.trainer.estimated_stepping_batches
-			# sched = lr_scheduler.OneCycleLR(
-			# 	optim,
-			# 	max_lr=[1e-3, 1e-3, 5e-3],
-			# 	total_steps=total_steps,
-			# 	pct_start=0.1,
-			# 	anneal_strategy="cos",
-			# 	final_div_factor=1e4,
-			# )
-			print(total_steps)
-			sched = get_linear_schedule_with_warmup(
+			sched = lr_scheduler.OneCycleLR(
 				optim,
-				num_warmup_steps=int(total_steps * 0.1),
-				num_training_steps=total_steps
+				max_lr=[1e-3, 1e-3, 5e-3],
+				total_steps=total_steps,
+				pct_start=0.1,
+				anneal_strategy="cos",
+				div_factor=1e2,
+				final_div_factor=1e3,
+				cycle_momentum=False,
 			)
+			# sched = get_linear_schedule_with_warmup(
+			# 	optim,
+			# 	num_warmup_steps=int(total_steps * 0.1),
+			# 	num_training_steps=total_steps
+			# )
 
 			return [optim], [
 				{"scheduler": sched, "interval": "step"},

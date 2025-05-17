@@ -47,7 +47,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		unique_smiles_count = torch.tensor(len(self.unique_smiles_set), dtype=torch.float)
 
 		valid_smiles_ratio = self.valid_count / self.total_count if self.total_count > 0 else torch.tensor(0.0)
-		avg_tanimoto = self.tanimoto_sum / self.valid_count if self.valid_count > 0 else torch.tensor(0.0)
+		avg_tanimoto = self.tanimoto_sum / self.total_count if self.valid_count > 0 else torch.tensor(0.0)
 		unique_ratio = unique_smiles_count / self.total_count if self.total_count > 0 else torch.tensor(0.0)
 		duplicate_ratio = self.duplicates_count / self.total_count if self.total_count > 0 else torch.tensor(0.0)
 
@@ -58,6 +58,29 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 			"duplicate_ratio": duplicate_ratio,
 			"duplicate_count": self.duplicates_count.to(torch.float16),
 		}
+
+	def compute_once(self, preds: list, targets: list) -> float:
+		tanimoto_sum = 0.0
+		valid_count = 0
+
+		for pred, target in zip(preds, targets):
+			mol_pred = Chem.MolFromSmiles(pred)
+			mol_target = Chem.MolFromSmiles(target)
+
+			if mol_pred and mol_target:
+				fp_pred = self.mfpgen.GetFingerprint(mol_pred)
+				fp_target = self.mfpgen.GetFingerprint(mol_target)
+
+				tanimoto_sum += DataStructs.TanimotoSimilarity(fp_pred, fp_target)
+				valid_count += 1
+
+		total_count = len(preds)
+
+		return {
+			"avg_tanimoto": tanimoto_sum / total_count,
+			"valid_smiles_ratio": valid_count / total_count,
+		}
+
 
 	def reset(self):
 		self.valid_count.zero_()
