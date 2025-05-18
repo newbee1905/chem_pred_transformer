@@ -1,3 +1,4 @@
+from torch._dynamo import disable
 import torch
 import torchmetrics
 
@@ -5,6 +6,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
 
 class SMILESEvaluationMetric(torchmetrics.Metric):
+	@disable
 	def __init__(self, dist_sync_on_step=False):
 		super().__init__(dist_sync_on_step=dist_sync_on_step)
 		self.add_state("valid_count", default=torch.tensor(0), dist_reduce_fx="sum")
@@ -14,6 +16,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		self.add_state("duplicates_count", default=torch.tensor(0), dist_reduce_fx="sum")
 		self.mfpgen = Chem.rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
 
+	@disable
 	def update(self, preds: list, targets: list) -> None:
 		assert len(preds) == len(targets), "Predictions and targets must have the same length"
 
@@ -43,6 +46,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		self.tanimoto_sum += tanimoto_sum
 		self.duplicates_count += duplicates
 
+	@disable
 	def compute(self):
 		unique_smiles_count = torch.tensor(len(self.unique_smiles_set), dtype=torch.float)
 
@@ -59,6 +63,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 			"duplicate_count": self.duplicates_count.to(torch.float16),
 		}
 
+	@disable
 	def compute_once(self, preds: list, targets: list) -> float:
 		tanimoto_sum = 0.0
 		valid_count = 0
@@ -81,7 +86,7 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 			"valid_smiles_ratio": valid_count / total_count,
 		}
 
-
+	@disable
 	def reset(self):
 		self.valid_count.zero_()
 		self.total_count.zero_()

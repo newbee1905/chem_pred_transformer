@@ -16,6 +16,13 @@ import pickle
 import lightning.pytorch as pl
 from utils import set_seed, filter_none_kwargs
 
+import torch._dynamo
+from torch._dynamo import disable
+
+torch._dynamo.config.dynamic_shapes = True
+torch._dynamo.config.cache_size_limit = 256
+pl.LightningModule.log = disable(pl.LightningModule.log)
+
 def resolve_py_path(path: str):
 	module_name, class_name = path.rsplit(".", 1)
 	module = importlib.import_module(module_name)
@@ -173,7 +180,7 @@ def my_app(cfg : DictConfig) -> None:
 	else:
 		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
 		if "pth_path" in cfg:
-			best = ckpt.best_model_path
+			best = module.best_model_path
 			sd = torch.load(best, map_location="cpu")["state_dict"]
 			torch.save(sd, cfg.pth_path)
 			print(f"Best model weights saved to {cfg.pth_path} (from {best})")

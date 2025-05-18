@@ -36,7 +36,12 @@ class BARTModel(pl.LightningModule):
 			rl_coef: float = 0.1,
 		):
 		super().__init__()
-		self.model = model
+		self.model = torch.compile(
+			model,
+			fullgraph=True,
+			backend="inductor",
+			# backend="cudagraphs",
+		)
 		self.tokenizer = tokenizer
 		self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
@@ -141,9 +146,15 @@ class BARTModel(pl.LightningModule):
 			# self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		if self.rl_coef > 0:
+			idx = torch.randint(0, src.size(0), (1,)).item()
+
+			src_i = src[idx:idx+1] 
+			tgt_i = tgt[idx:idx+1]
+			mask_i = src_padding_mask[idx:idx+1]
+
 			with torch.no_grad():
 				generated_tokens, log_pi = self.model.generate(
-					src, src_padding_mask, nucleus_sampler,
+					src_i, mask_i, nucleus_sampler,
 					max_length=self.max_length,
 					start_token_id=self.tokenizer.bos_token_id,
 					end_token_id=self.tokenizer.eos_token_id,
@@ -151,7 +162,8 @@ class BARTModel(pl.LightningModule):
 					return_logpi=True,
 				) 
 
-			ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
+			# ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
+			ref_smiles_list = self.tokenizer.batch_decode(tgt_i, skip_special_tokens=True)
 			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 
 			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
@@ -389,13 +401,12 @@ class BARTModel(pl.LightningModule):
 				{"params": aux_params, "lr": 5e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
-
 			total_steps = self.trainer.estimated_stepping_batches
 			sched = lr_scheduler.OneCycleLR(
 				optim,
 				max_lr=[1e-3, 1e-3, 5e-3],
 				total_steps=total_steps,
-				pct_start=0.1,
+				pct_start=0.01,
 				anneal_strategy="cos",
 				div_factor=1e2,
 				final_div_factor=1e3,
