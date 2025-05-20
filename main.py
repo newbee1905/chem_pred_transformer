@@ -180,8 +180,12 @@ def my_app(cfg : DictConfig) -> None:
 	else:
 		trainer.fit(module, train_dl, val_dl, **trainer_kwargs)
 		if "pth_path" in cfg:
-			best = module.best_model_path
-			sd = torch.load(best, map_location="cpu")["state_dict"]
+			ckpt_cb = next(
+				cb for cb in trainer.callbacks
+				if isinstance(cb, ModelCheckpoint)
+			)
+			best_ckpt = ckpt_cb.best_model_path
+			sd = torch.load(best_ckpt, map_location="cpu")["state_dict"]
 			torch.save(sd, cfg.pth_path)
 			print(f"Best model weights saved to {cfg.pth_path} (from {best})")
 

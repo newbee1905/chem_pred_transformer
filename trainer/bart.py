@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from transformers import get_linear_schedule_with_warmup
+from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 from torch.optim import lr_scheduler
 
 import lightning.pytorch as pl
@@ -154,7 +154,7 @@ class BARTModel(pl.LightningModule):
 
 			with torch.no_grad():
 				generated_tokens, log_pi = self.model.generate(
-					src_i, mask_i, nucleus_sampler,
+					src_i, mask_i, greedy_sampler,
 					max_length=self.max_length,
 					start_token_id=self.tokenizer.bos_token_id,
 					end_token_id=self.tokenizer.eos_token_id,
@@ -177,13 +177,13 @@ class BARTModel(pl.LightningModule):
 			reward = reward.to(src.device)
 			rl_loss = rl_loss.to(src.device)
 
-			self.log("train_rl_loss", rl_loss, prog_bar=True, sync_dist=True)
-			self.log("train_reward", reward, prog_bar=True, sync_dist=True)
+			self.log("rl_loss", rl_loss, prog_bar=True, sync_dist=True)
+			self.log("reward", reward, prog_bar=True, sync_dist=True)
 
 			loss = loss + self.rl_coef * rl_loss
 
 		if aux_preds or self.rl_coef > 0:
-			self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
+			self.log("total_loss", loss, prog_bar=True, sync_dist=True)
 
 		return loss
 
@@ -396,27 +396,32 @@ class BARTModel(pl.LightningModule):
 					main_params.append(p)
 
 			optim = AdamW([
-				{"params": main_params, "lr": 1e-3, "weight_decay": 0.01},
-				{"params": no_decay, "lr": 1e-3, "weight_decay": 0.0},
-				{"params": aux_params, "lr": 5e-3, "weight_decay": 0.01},
+				{"params": main_params, "lr": 3e-4, "weight_decay": 0.01},
+				{"params": no_decay, "lr": 3e-4, "weight_decay": 0.0},
+				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
 			total_steps = self.trainer.estimated_stepping_batches
-			sched = lr_scheduler.OneCycleLR(
-				optim,
-				max_lr=[1e-3, 1e-3, 5e-3],
-				total_steps=total_steps,
-				pct_start=0.01,
-				anneal_strategy="cos",
-				div_factor=1e2,
-				final_div_factor=1e3,
-				cycle_momentum=False,
-			)
+			# sched = lr_scheduler.OneCycleLR(
+			# 	optim,
+			# 	max_lr=[1e-3, 1e-3, 5e-3],
+			# 	total_steps=total_steps,
+			# 	pct_start=0.01,
+			# 	anneal_strategy="cos",
+			# 	div_factor=1e2,
+			# 	final_div_factor=1e3,
+			# 	cycle_momentum=False,
+			# )
 			# sched = get_linear_schedule_with_warmup(
 			# 	optim,
-			# 	num_warmup_steps=int(total_steps * 0.1),
+			# 	num_warmup_steps=int(total_steps * 0.01),
 			# 	num_training_steps=total_steps
 			# )
+			sched = get_cosine_schedule_with_warmup(
+				optim,
+				num_warmup_steps=int(total_steps * 0.05),
+				num_training_steps=total_steps
+			)
 
 			return [optim], [
 				{"scheduler": sched, "interval": "step"},
