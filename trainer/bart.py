@@ -157,9 +157,15 @@ class BARTModel(pl.LightningModule):
 
 			idx = torch.randint(0, src.size(0), (1,)).item()
 
-			src_i = src[idx:idx+1] 
-			tgt_i = tgt[idx:idx+1]
-			mask_i = src_padding_mask[idx:idx+1]
+			bsz = src.size(0)
+			k = min(16, bsz)
+			# src_i = src[idx:idx+1] 
+			# tgt_i = tgt[idx:idx+1]
+			# mask_i = src_padding_mask[idx:idx+1]
+			idx = torch.randperm(bsz)[:k]
+			src_i = src[idx] 
+			tgt_i = tgt[idx]
+			mask_i = src_padding_mask[idx]
 
 			with torch.no_grad():
 				generated_tokens, log_pi = self.model.generate(
@@ -181,7 +187,8 @@ class BARTModel(pl.LightningModule):
 			reward = torch.tensor(metrics["avg_tanimoto"])
 
 			self.baseline = 0.9 * self.baseline + 0.1 * reward.item()
-			rl_loss = -(reward - self.baseline) * log_pi.mean()
+			raw_rl = -(reward - self.baseline) * log_pi.mean()
+			rl_loss = raw_rl.clamp(min=-1, max=1)
 
 			reward = reward.to(src.device)
 			rl_loss = rl_loss.to(src.device)
@@ -410,7 +417,7 @@ class BARTModel(pl.LightningModule):
 				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
-			if self.total_steps = None:
+			if self.total_steps is None:
 				self.total_steps = self.trainer.estimated_stepping_batches
 				self.warmup_steps = self.warm_up_percent * self.total_steps
 			# sched = lr_scheduler.OneCycleLR(
@@ -430,8 +437,8 @@ class BARTModel(pl.LightningModule):
 			# )
 			sched = get_cosine_schedule_with_warmup(
 				optim,
-				num_warmup_steps=int(total_steps * 0.05),
-				num_training_steps=total_steps
+				num_warmup_steps=int(self.total_steps * self.warm_up_percent),
+				num_training_steps=self.total_steps
 			)
 
 			return [optim], [
