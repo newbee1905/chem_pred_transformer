@@ -33,6 +33,7 @@ class BARTModel(pl.LightningModule):
 			# aux_warmup_epochs: int = 10,
 			aux_warmup_steps: int = 10000,
 			aux_weight_max: float = 0.1,
+			warm_up_percent: float = 0.05,
 			rl_coef: float = 0.1,
 		):
 		super().__init__()
@@ -62,6 +63,10 @@ class BARTModel(pl.LightningModule):
 
 		self.rl_coef = rl_coef
 		self.baseline = 0.0
+
+		self.warm_up_percent = warm_up_percent
+		self.total_steps = None
+		self.warmup_steps = None
 
 		# self.automatic_optimization = False
 
@@ -146,6 +151,10 @@ class BARTModel(pl.LightningModule):
 			# self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
 
 		if self.rl_coef > 0:
+			step = float(self.global_step)
+			alpha = min(1.0, step / self.warmup_steps) if self.warmup_steps is not None else 0
+			self.rl_weight = alpha * self.rl_coef
+
 			idx = torch.randint(0, src.size(0), (1,)).item()
 
 			src_i = src[idx:idx+1] 
@@ -180,7 +189,7 @@ class BARTModel(pl.LightningModule):
 			self.log("rl_loss", rl_loss, prog_bar=True, sync_dist=True)
 			self.log("reward", reward, prog_bar=True, sync_dist=True)
 
-			loss = loss + self.rl_coef * rl_loss
+			loss = loss + self.rl_weight * rl_loss
 
 		if aux_preds or self.rl_coef > 0:
 			self.log("total_loss", loss, prog_bar=True, sync_dist=True)
@@ -401,7 +410,9 @@ class BARTModel(pl.LightningModule):
 				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
-			total_steps = self.trainer.estimated_stepping_batches
+			if self.total_steps = None:
+				self.total_steps = self.trainer.estimated_stepping_batches
+				self.warmup_steps = self.warm_up_percent * self.total_steps
 			# sched = lr_scheduler.OneCycleLR(
 			# 	optim,
 			# 	max_lr=[1e-3, 1e-3, 5e-3],

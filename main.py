@@ -19,6 +19,8 @@ from utils import set_seed, filter_none_kwargs
 import torch._dynamo
 from torch._dynamo import disable
 
+from lightning.pytorch.callbacks import ModelCheckpoint
+
 torch._dynamo.config.dynamic_shapes = True
 torch._dynamo.config.cache_size_limit = 256
 pl.LightningModule.log = disable(pl.LightningModule.log)
