@@ -123,11 +123,17 @@ class Base(nn.Module):
 
 	def generate(
 		self, src: torch.Tensor, src_mask: torch.Tensor, sampler,
-		max_length: int = 50, **sampler_kwargs
+		max_length: int = 50, 
+		memory_override: torch.Tensor | None = None,
+		**sampler_kwargs
 	) -> torch.Tensor:
 		"""Generate full text using an external sampler."""
 		self.clear_cache()
-		memory = self.encode(src, src_mask)
+		if memory_override is None:
+			assert src is not None, "src required when memory not supplied"
+			memory = self.encode(src, src_mask)
+		else:
+			memory = memory_override
 
 		return sampler(self, memory, src_mask, max_length, **sampler_kwargs)
 
