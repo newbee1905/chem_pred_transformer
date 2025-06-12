@@ -28,21 +28,23 @@ class BARTModel(pl.LightningModule):
 	def __init__(
 			self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer,
 			mode: str = "pretrain",
-			sampler: str = "greedy", kv_cache: bool = False,
+			sampler: str = "greedy",
+			kv_cache: bool = False,
 			beam_size: int = 20,
 			# aux_warmup_epochs: int = 10,
 			aux_warmup_steps: int = 10000,
 			aux_weight_max: float = 0.1,
 			warm_up_percent: float = 0.05,
-			rl_coef: float = 0.1,
+			rl_coef: float = 0,
 		):
 		super().__init__()
-		self.model = torch.compile(
-			model,
-			fullgraph=True,
-			backend="inductor",
-			# backend="cudagraphs",
-		)
+		# self.model = torch.compile(
+		# 	model,
+		# 	fullgraph=True,
+		# 	backend="inductor",
+		# 	# backend="cudagraphs",
+		# )
+		self.model = model
 		self.tokenizer = tokenizer
 		self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
@@ -252,9 +254,9 @@ class BARTModel(pl.LightningModule):
 		)
 		generated_tokens = generated_tokens.cpu()
 		gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-		pprint(gen_smiles_list, stream=sys.stderr)
-		pprint(ref_smiles_list, stream=sys.stderr)
-		print("----------------------------------------", file=sys.stderr)
+		# pprint(gen_smiles_list, stream=sys.stderr)
+		# pprint(ref_smiles_list, stream=sys.stderr)
+		# print("----------------------------------------", file=sys.stderr)
 		smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 		smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 		self.log("v_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
@@ -327,15 +329,15 @@ class BARTModel(pl.LightningModule):
 			)
 			generated_tokens = generated_tokens.cpu()
 			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-			pprint(gen_smiles_list, stream=sys.stderr)
-			pprint(ref_smiles_list, stream=sys.stderr)
-			print("----------------------------------------", file=sys.stderr)
+			# pprint(gen_smiles_list, stream=sys.stderr)
+			# pprint(ref_smiles_list, stream=sys.stderr)
+			# print("----------------------------------------", file=sys.stderr)
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
 
-			print(ref_smiles_list)
-			print(gen_smiles_list)
+			# print(ref_smiles_list)
+			# print(gen_smiles_list)
 		else:
 			generated_tokens, beam_scores = self.model.generate(
 				src, src_padding_mask, beam_search_sampler,
@@ -350,9 +352,9 @@ class BARTModel(pl.LightningModule):
 			top_beam_tokens = generated_tokens[:, 0, :].cpu()
 			gen_smiles_list = self.tokenizer.batch_decode(top_beam_tokens, skip_special_tokens=True)
 
-			pprint(gen_smiles_list, stream=sys.stderr)
-			pprint(ref_smiles_list, stream=sys.stderr)
-			print("----------------------------------------", file=sys.stderr)
+			# pprint(gen_smiles_list, stream=sys.stderr)
+			# pprint(ref_smiles_list, stream=sys.stderr)
+			# print("----------------------------------------", file=sys.stderr)
 
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
@@ -397,7 +399,7 @@ class BARTModel(pl.LightningModule):
 				(step + 1) ** (-0.5),
 				(step + 1) * (warmup_steps ** -1.5)
 			)
-			scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+			scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 			return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 		else:
 			main_params = []
