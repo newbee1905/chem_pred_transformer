@@ -8,6 +8,8 @@ import pickle
 
 from rdkit import Chem
 
+from typing import Tuple
+
 def validate_mol(org_smi):
 	mol = Chem.MolFromSmiles(org_smi)
 	if mol is None:

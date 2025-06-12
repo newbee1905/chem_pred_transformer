@@ -162,6 +162,7 @@ class DecoderLayer(nn.Module):
 		norm_tgt = self.cross_attn_norm(tgt)
 		cross_attn_out = self.cross_attn(
 			norm_tgt, memory, memory, memory_mask,
+			# start_pos=start_pos, freqs_cis=None,
 			start_pos=start_pos, freqs_cis=freqs_cis,
 		)
 		cross_attn_out = self.cross_attn_dropout(cross_attn_out)

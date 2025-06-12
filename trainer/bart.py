@@ -35,14 +35,13 @@ class BARTModel(pl.LightningModule):
 			aux_warmup_steps: int = 10000,
 			aux_weight_max: float = 0.1,
 			warm_up_percent: float = 0.05,
-			rl_coef: float = 0,
+			rl_coef: float = 0.1,
+			# rl_coef: float = 0,
 		):
 		super().__init__()
 		# self.model = torch.compile(
 		# 	model,
 		# 	fullgraph=True,
-		# 	backend="inductor",
-		# 	# backend="cudagraphs",
 		# )
 		self.model = model
 		self.tokenizer = tokenizer
