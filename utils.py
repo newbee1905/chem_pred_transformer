@@ -66,3 +66,28 @@ def write_lmdb(smiles_list, lmdb_path):
 		txn.put(b"__len__", pickle.dumps(len(smiles_list)))
 	env.sync()
 	env.close()
+
+def _expand_for_k(
+	memory: torch.Tensor,
+	src_mask: torch.Tensor,
+	k: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+	"""Return *views* (no copy) that repeat each batch row `k` times."""
+
+	# (seq, bsz, 1, H) -> (seq, bsz, k, d_model) -> (seq, bsz * k, d_model)
+	mem_k = (
+		memory
+			.unsqueeze(2)
+			.expand(-1, -1, k, -1)
+			.reshape(memory.size(0), -1, memory.size(-1))
+	)
+
+	# (bsz, 1, seq) -> (bsz, k, seq) -> (bsz * k, seq)
+	mask_k = (
+		src_mask
+			.unsqueeze(1)
+			.expand(-1, k, -1)
+			.reshape(-1, src_mask.size(1))
+	)
+
+	return mem_k, mask_k
