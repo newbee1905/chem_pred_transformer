@@ -80,10 +80,14 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 				valid_count += 1
 
 		total_count = len(preds)
+		
+		# Ensure division by zero is handled, return 0 if no valid pairs
+		avg_tanimoto_val = tanimoto_sum / total_count if total_count > 0 else 0.0
+		valid_smiles_ratio_val = valid_count / total_count if total_count > 0 else 0.0
 
 		return {
-			"avg_tanimoto": tanimoto_sum / total_count,
-			"valid_smiles_ratio": valid_count / total_count,
+			"avg_tanimoto": avg_tanimoto_val,
+			"valid_smiles_ratio": valid_smiles_ratio_val,
 		}
 
 	@disable
@@ -93,3 +97,36 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		self.tanimoto_sum.zero_()
 		self.unique_smiles_set.clear()
 		self.duplicates_count.zero_()
+
+
+_mfpgen_singleton = Chem.rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+
+@disable
+def compute_batch_tanimoto_rewards(
+	pred_smiles_list: list[str], 
+	target_smiles_list: list[str],
+	device: torch.device = torch.device("cpu")
+) -> torch.Tensor:
+	"""
+	Computes Tanimoto similarity for a batch of predicted and target SMILES strings.
+	Returns a tensor of rewards.
+	"""
+	if len(pred_smiles_list) != len(target_smiles_list):
+		raise ValueError("preds and targets must have the same length")
+
+	rewards = []
+	for pred_smi, target_smi in zip(pred_smiles_list, target_smiles_list):
+		mol_pred = Chem.MolFromSmiles(pred_smi)
+		mol_target = Chem.MolFromSmiles(target_smi)
+		
+		reward = 0.0
+		if mol_pred and mol_target:
+			try:
+				fp_pred = _mfpgen_singleton.GetFingerprint(mol_pred)
+				fp_target = _mfpgen_singleton.GetFingerprint(mol_target)
+				reward = DataStructs.TanimotoSimilarity(fp_pred, fp_target)
+			except Exception:
+				pass
+		rewards.append(reward)
+	
+	return torch.tensor(rewards, dtype=torch.float32, device=device)
