@@ -186,3 +186,30 @@ class Base(nn.Module):
 			# aux_preds[f"prod_{name}"] = aux_prod[:, i]
 
 		return logits.transpose(0, 1), aux_preds
+
+	def evaluate_actions(
+		self, memory: torch.Tensor, src_mask: torch.Tensor, tgt_tokens: torch.Tensor, pad_token_id: int
+	) -> tuple[torch.Tensor, torch.Tensor]:
+		"""
+		Evaluates the log-probabilities and entropy of a given sequence of actions.
+		"""
+		decoder_input = tgt_tokens[:, :-1]
+		labels = tgt_tokens[:, 1:]
+
+		decoder_output = self.decode(tgt=decoder_input, memory=memory, memory_mask=src_mask)
+		logits = self.token_fc(decoder_output).transpose(0, 1) # Shape: [Batch, SeqLen-1, VocabSize]
+
+		log_probs_dist = F.log_softmax(logits, dim=-1)
+		gathered_log_probs = torch.gather(log_probs_dist, 2, labels.unsqueeze(-1)).squeeze(-1)
+		
+		probs_dist = torch.exp(log_probs_dist)
+		entropy_per_token = -(probs_dist * log_probs_dist).sum(dim=-1)
+
+		non_pad_mask = (labels != pad_token_id)
+		gathered_log_probs = gathered_log_probs * non_pad_mask
+		entropy_per_token = entropy_per_token * non_pad_mask
+
+		sequence_log_probs = gathered_log_probs.sum(dim=1)
+		sequence_entropy = entropy_per_token.sum(dim=1) / non_pad_mask.sum(dim=1)
+
+		return sequence_log_probs, sequence_entropy
