@@ -3,10 +3,12 @@ import os
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+impore re
 
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
 from tokenisers.neochem import ChemformerTokenizerFast
+from models.mha import KVCacheMHA
 
 import torch
 import torch.nn as nn
@@ -44,6 +46,36 @@ BATCH_SIZE = 8
 NUM_WORKERS = 12
 NUM_EPOCHS = 10
 CKPT_PATH = "train_checkpoints_server/best-checkpoint-finetune-uspto-sep-bart_small_v8-tanimoto-v8.ckpt"
+
+VALID_SMILES_CHARS_RE = re.compile(r'[^\w\(\)\[\]=\-\#/\+\.@%0-9]')
+INVALID_BOND_SEQUENCE_RE = re.compile(r'==|##|==#|##=')
+ATOM_PATTERN_RE = re.compile(r'[A-Z][a-z]?')
+
+def intermediate_smiles_reward(
+	partial_smiles: str,
+	reactant_smiles: str
+) -> float:
+	"""
+	Performs syntax checks and atom-count matching for a partial SMILES.
+	"""
+	# Syntax heuristics
+	if VALID_SMILES_CHARS_RE.search(partial_smiles):
+		return 0.0
+	if (partial_smiles.count('(') < partial_smiles.count(')') or
+			partial_smiles.count('[') < partial_smiles.count(']')):
+		return 0.0
+	if INVALID_BOND_SEQUENCE_RE.search(partial_smiles):
+		return 0.0
+
+	# Atom counts
+	reac_atoms = ATOM_PATTERN_RE.findall(reactant_smiles)
+	if not reac_atoms:
+		return 1.0
+
+	prod_atoms = ATOM_PATTERN_RE.findall(partial_smiles)
+
+	diff = abs(len(prod_atoms) - len(reac_atoms))
+	return max(0.0, 1.0 - diff / len(reac_atoms))
 
 tokenizer = ChemformerTokenizerFast("bart_vocab.json")
 vocab_size = tokenizer.vocab_size
@@ -111,18 +143,35 @@ class AttentionPooler(nn.Module):
 		return pooled_output
 
 class Critic(nn.Module):
-	def __init__(self, d_model: int):
+	def __init__(self, d_model: int, n_heads: int = 8):
 		super().__init__()
 		self.d_model = d_model
+		self.n_heads = n_heads
+
+		self.cross_attn = KVCacheMHA(
+			d_model=self.d_model,
+			n_heads=self.n_heads
+		)
+
 		self.pooler = AttentionPooler(self.d_model)
+
 		self.value_head = nn.Sequential(
 			nn.Linear(self.d_model, self.d_model // 2),
 			nn.SiLU(),
 			nn.Linear(self.d_model // 2, 1)
 		)
 
-	def forward(self, memory, src_mask=None):
-		pooled_memory = self.pooler(memory, src_mask)
+	def forward(self, decoded_hidden_states, memory, src_mask=None):
+		attn_output = self.cross_attention(
+			query=decoder_hidden_states,
+			key=memory,
+			value=memory,
+			attn_mask=src_mask,
+			is_causal=False,
+			kv_cache=False,
+		)
+
+		pooled_memory = self.pooler(attn_output)
 		value = self.value_head(pooled_memory).squeeze(-1)
 
 		return value
@@ -136,10 +185,12 @@ class PPOModule(pl.LightningModule):
 		sampler_fn: Callable = nucleus_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 1e-5,
-		ppo_epochs: int = 10,
+		ppo_epochs: int = 2,
 		clip_epsilon: float = 0.2,
 		vf_coef: float = 0.5,
 		ent_coef: float = 0.01,
+		kl_coef: float = 0.1,
+		tanimoto_scale: float = 500.0, # since max length is close to 300, tanimoto only goese from 0 to 1, increase it by 500 to have more impact compare to grammar reward
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -175,29 +226,52 @@ class PPOModule(pl.LightningModule):
 				self.actor, memory, src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
 			)
 
-			values = self.critic(memory, src_mask)
+			decoder_input_for_value = pred_tokens[:, :-1]
+			decoder_output_for_value = self.actor.decode(
+				decoder_input_for_value, memory, memory_mask=src_mask
+			)
+
+			values = self.critic(decoder_output_for_value, memory, src_mask)
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		target_smiles = self.tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
-		rewards = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device)
+
+		tanimoto = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device) * self.hparams.tanimoto_scale
+
+		grammar_rewards = []
+		for b in range(pred_tokens.size(0)):
+			prefixes = [
+				self.tokenizer.decode(
+					pred_tokens[b, : i + 1].tolist(),
+					skip_special_tokens=True,
+				)
+				for i in range(seq.size(1))
+			]
+			scores = [
+				intermediate_smiles_reward(pref, reactant_smiles[b])
+				for pref in prefixes
+			]
+			grammar_rewards.append(sum(scores) / len(scores))
+		grammar = torch.tensor(grammar_rewards, device=self.device)
+
+		rewards = tanimoto + grammar
 
 		returns = rewards.detach()
 		adv = (returns - values).detach()
 
 		# Normalize advantages for training stability 
-		adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+		adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
 
 		self.actor.train()
 		self.critic.train()
 
 		actions = pred_tokens.detach()
 		for _ in range(self.hparams.ppo_epochs):
-			new_log_probs, entropy = self.actor.evaluate_actions(
-				memory.detach(), src_mask, actions, self.tokenizer.pad_token_id,
+			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
+				memory, expanded_src_mask, pred_tokens, self.tokenizer.pad_token_id
 			)
 
-			new_values = self.critic(memory.detach(), src_mask)
-
+			new_values = self.critic(decoder_output, memory.detach(), src_mask)
 			new_log_probs = new_log_probs.to(old_log_probs.device)
 
 			# Policy Loss (Clipped Surrogate Objective)
@@ -206,7 +280,9 @@ class PPOModule(pl.LightningModule):
 			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
 			policy_loss = -torch.min(s1, s2).mean()
 
-			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean()
+			kl = (old_log_probs - new_log_probs).mean()
+
+			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl
 
 			# Value Function Loss
 			value_loss = F.mse_loss(new_values, returns)
@@ -314,6 +390,94 @@ class PPOModule(pl.LightningModule):
 		opt_actor = torch.optim.AdamW(self.actor.parameters(), lr=self.hparams.lr)
 		opt_critic = torch.optim.AdamW(self.critic.parameters(), lr=self.hparams.lr)
 		return opt_actor, opt_critic
+
+class GRPOModule(pl.LightningModule):
+	def __init__(
+		self,
+		actor: BART | Chemformer,
+		tokenizer,
+		sampler_fn: Callable = nucleus_sampler,
+		sampler_kwargs: Optional[Dict[str, Any]] = None,
+		lr: float = 1e-5,
+		ppo_epochs: int = 4,
+		clip_epsilon: float = 0.2,
+		ent_coef: float = 0.01,
+		num_generations_g: int = 4,
+	):
+		super().__init__()
+		self.save_hyperparameters(ignore=["actor", "tokenizer"])
+		
+		self.num_generations_g = num_generations_g
+
+	def training_step(self, batch: dict, batch_idx: int):
+		opt_actor = self.optimizers()
+
+		self.actor.eval()
+		src_tokens = batch["input_ids"]
+		src_mask = batch.get("attention_mask").eq(0)
+		tgt_tokens = batch["labels"]
+		
+		batch_size = src_tokens.size(0)
+
+		# Shape: [B, SeqLen] -> [B * G, SeqLen]
+		expanded_src_tokens = src_tokens.repeat_interleave(self.num_generations_g, dim=0)
+		expanded_src_mask = src_mask.repeat_interleave(self.num_generations_g, dim=0)
+		
+		with torch.no_grad():
+			memory = self.actor.encode(expanded_src_tokens, expanded_src_mask)
+			
+			# Generate G sequences for each original input
+			# pred_tokens shape: [B * G, OutSeqLen]
+			# old_log_probs shape: [B * G]
+			pred_tokens, old_log_probs, _ = self.sampler_fn(
+				self.actor, memory, expanded_src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
+			)
+
+		# Comparing each of the G generations to its corresponding target
+		# Shape: [B, SeqLen] -> [B * G, SeqLen]
+		expanded_tgt_tokens = tgt_tokens.repeat_interleave(self.num_generations_g, dim=0)
+
+		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
+		target_smiles = self.tokenizer.batch_decode(expanded_tgt_tokens.tolist(), skip_special_tokens=True)
+
+		# [B * G]
+		accepted_mask = torch.tensor(
+			[p == t for p, t in zip(pred_smiles, target_smiles)],
+			device=self.device
+		)
+		
+		rejected_mask = ~accepted_mask
+		old_log_probs = old_log_probs.detach()
+
+		self.actor.train()
+		for _ in range(self.hparams.ppo_epochs):
+			# The evaluation is done on the full [B * G] batch
+			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
+				memory, expanded_src_mask, pred_tokens, self.tokenizer.pad_token_id
+			)
+
+			accepted_log_probs = new_log_probs[accepted_mask]
+			accepted_loss = -accepted_log_probs.mean() if accepted_log_probs.numel() > 0 else torch.tensor(0.0, device=self.device)
+
+			rejected_new_log_probs = new_log_probs[rejected_mask]
+			rejected_old_log_probs = old_log_probs[rejected_mask]
+			if rejected_new_log_probs.numel() > 0:
+				ratio = (rejected_new_log_probs - rejected_old_log_probs).exp()
+				rejected_loss = F.relu(ratio - (1.0 + self.hparams.clip_epsilon)).mean()
+			else:
+				rejected_loss = torch.tensor(0.0, device=self.device)
+				
+			entropy_bonus = self.hparams.ent_coef * entropy.mean()
+			total_loss = accepted_loss + rejected_loss - entropy_bonus
+
+			opt_actor.zero_grad()
+			self.manual_backward(total_loss)
+			opt_actor.step()
+
+		# Logging the accepted ratio over the B*G samples
+		self.log_dict({
+			"train/accepted_ratio": accepted_mask.float().mean(),
+		}, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
 
 untrained_bart_nn_module = BART(**MODEL_CONFIG)
 
