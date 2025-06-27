@@ -189,7 +189,7 @@ class Base(nn.Module):
 
 	def evaluate_actions(
 		self, memory: torch.Tensor, src_mask: torch.Tensor, tgt_tokens: torch.Tensor, pad_token_id: int
-	) -> tuple[torch.Tensor, torch.Tensor]:
+	) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 		"""
 		Evaluates the log-probabilities and entropy of a given sequence of actions.
 		"""
