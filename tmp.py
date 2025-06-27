@@ -42,8 +42,8 @@ from typing import Optional, Callable, Dict, Any
 
 USPTO_CSV_FILE = "USPTO_MIT.csv"
 MAX_LENGTH = 282
-BATCH_SIZE = 16
-NUM_WORKERS = 10
+BATCH_SIZE = 256
+NUM_WORKERS = 12
 NUM_EPOCHS = 10
 CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 
@@ -148,10 +148,10 @@ class Critic(nn.Module):
 		self.d_model = d_model
 		self.n_heads = n_heads
 
-		self.cross_attn = KVCacheMHA(
-			d_model=self.d_model,
-			n_heads=self.n_heads
-		)
+		# self.cross_attn = KVCacheMHA(
+		# 	d_model=self.d_model,
+		# 	n_heads=self.n_heads
+		# )
 
 		self.pooler = AttentionPooler(self.d_model)
 
@@ -182,20 +182,21 @@ class Critic(nn.Module):
 	# 	return value
 
 
+
 class PPOModule(pl.LightningModule):
 	def __init__(
 		self,
 		actor: BART | Chemformer,
 		critic: Critic,
 		tokenizer,
-		sampler_fn: Callable = nucleus_sampler,
+		sampler_fn: Callable = greedy_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
-		lr: float = 1e-5,
-		ppo_epochs: int = 2,
+		lr: float = 1e-6,
+		ppo_epochs: int = 4,
 		clip_epsilon: float = 0.2,
 		vf_coef: float = 0.5,
 		ent_coef: float = 0.01,
-		kl_coef: float = 0.02,
+		kl_coef: float = 0.1,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])

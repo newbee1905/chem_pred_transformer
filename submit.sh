@@ -1,8 +1,8 @@
 #!/bin/sh
 #SBATCH --qos=xbatch
-#SBATCH --gres=gpu:v100:2
-#SBATCH --cpus-per-task=6
-#SBATCH --time=0-24:00:00 
+#SBATCH --gres=gpu:l40s:2
+#SBATCH --cpus-per-task=12
+#SBATCH --time=1-12:00:00 
 #SBATCH --mem=16G
 #SBATCH --output=finetune_gpu_job.out
 #SBATCH --error=finetune_gpu_job.err
@@ -13,4 +13,5 @@
 source activate $1
 source .venv/bin/activate
 
-srun python train.py
+# srun python train.py
+srun python tmp.py
