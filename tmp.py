@@ -148,10 +148,10 @@ class Critic(nn.Module):
 		self.d_model = d_model
 		self.n_heads = n_heads
 
-		# self.cross_attn = KVCacheMHA(
-		# 	d_model=self.d_model,
-		# 	n_heads=self.n_heads
-		# )
+		self.cross_attn = KVCacheMHA(
+			d_model=self.d_model,
+			n_heads=self.n_heads
+		)
 
 		self.pooler = AttentionPooler(self.d_model)
 
