@@ -205,6 +205,8 @@ def nucleus_sampler(
 		last_dec = dec[-1] if not kv_cache else dec[-1, :, :]
 		logits = model.token_fc(last_dec) / temperature
 
+		full_log_probs = F.log_softmax(logits, dim=-1)
+
 		# sort logits descending, compute softmax probabilities
 		sorted_logits, sorted_idx = torch.sort(logits, descending=True, dim=-1)
 		cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -220,7 +222,7 @@ def nucleus_sampler(
 
 		next_token = torch.multinomial(probs, num_samples=1)
 		if return_logpi:
-			log_prob_t = torch.log(probs.gather(1, next_token).squeeze(1) + 1e-9)
+			log_prob_t = full_log_probs.gather(1, next_token).squeeze(1)
 			log_pi += torch.where(finished, 0.0, log_prob_t)
 
 		next_token = torch.where(
