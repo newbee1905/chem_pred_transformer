@@ -51,7 +51,8 @@ def greedy_sampler(
 		)
 
 		if return_logpi:
-			log_pi += log_probs.gather(1, next_token).squeeze(1)
+			log_prob_t = log_probs.gather(1, next_token).squeeze(1)
+			log_pi += torch.where(finished, 0.0, log_prob_t)
 
 		generated = torch.cat([generated, next_token], dim=1)
 
@@ -219,7 +220,8 @@ def nucleus_sampler(
 
 		next_token = torch.multinomial(probs, num_samples=1)
 		if return_logpi:
-			log_pi += torch.log(probs.gather(1, next_token).squeeze(1) + 1e-9)
+			log_prob_t = torch.log(probs.gather(1, next_token).squeeze(1) + 1e-9)
+			log_pi += torch.where(finished, 0.0, log_prob_t)
 
 		next_token = torch.where(
 			finished.unsqueeze(-1),
