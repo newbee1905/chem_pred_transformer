@@ -312,8 +312,8 @@ class PPOModule(pl.LightningModule):
 
 			log_temp_ratio_clipped = torch.clamp(
 				log_temp_ratio, 
-				min=-10,
-				max=10,
+				min=-3,
+				max=3,
 				# min=log_temp_ratio_mean - 3 * log_temp_ratio_std,
 				# max=log_temp_ratio_mean + 3 * log_temp_ratio_std
 			)
@@ -359,8 +359,8 @@ class PPOModule(pl.LightningModule):
 
 			log_ratio_clipped = torch.clamp(
 				log_ratio, 
-				min=-10,
-				max=10,
+				min=-3,
+				max=3,
 				# min=log_ratio_mean - 3 * log_ratio_std,
 				# max=log_ratio_mean + 3 * log_ratio_std
 			)
