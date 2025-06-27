@@ -22,7 +22,7 @@ def greedy_sampler(
 	finished = torch.zeros(bsz, dtype=torch.bool, device=device)
 
 	if return_logpi:
-		log_pi = torch.zeros(bsz, device=torch.device("cpu"))
+		log_pi = torch.zeros(bsz, device=device)
 
 	for t in range(max_length - 1):
 		start_pos = t if kv_cache else 0
@@ -51,7 +51,7 @@ def greedy_sampler(
 		)
 
 		if return_logpi:
-			log_pi += log_probs.gather(1, next_token).squeeze(1).to(torch.device("cpu"))
+			log_pi += log_probs.gather(1, next_token).squeeze(1)
 
 		generated = torch.cat([generated, next_token], dim=1)
 
@@ -186,7 +186,7 @@ def nucleus_sampler(
 	generated = torch.full((bsz, 1), start_token_id, device=device, dtype=torch.long)
 	finished = torch.zeros(bsz, dtype=torch.bool, device=device)
 	if return_logpi:
-		log_pi = torch.zeros(bsz, device='cpu')
+		log_pi = torch.zeros(bsz, device=device)
 
 	for t in range(max_length - 1):
 		start_pos = t if kv_cache else 0
@@ -219,7 +219,7 @@ def nucleus_sampler(
 
 		next_token = torch.multinomial(probs, num_samples=1)
 		if return_logpi:
-			log_pi += torch.log(probs.gather(1, next_token).squeeze(1)).to('cpu')
+			log_pi += torch.log(probs.gather(1, next_token).squeeze(1))
 
 		next_token = torch.where(
 			finished.unsqueeze(-1),

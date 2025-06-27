@@ -210,6 +210,6 @@ class Base(nn.Module):
 		entropy_per_token = entropy_per_token * non_pad_mask
 
 		sequence_log_probs = gathered_log_probs.sum(dim=1)
-		sequence_entropy = entropy_per_token.sum(dim=1) / non_pad_mask.sum(dim=1)
+		sequence_entropy = entropy_per_token.sum(dim=1) / (non_pad_mask.sum(dim=1).float() + 1e-9)
 
 		return sequence_log_probs, sequence_entropy, decoder_output

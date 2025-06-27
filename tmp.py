@@ -188,7 +188,7 @@ class PPOModule(pl.LightningModule):
 		actor: BART | Chemformer,
 		critic: Critic,
 		tokenizer,
-		sampler_fn: Callable = greedy_sampler,
+		sampler_fn: Callable = nucleus_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 1e-5,
 		ppo_epochs: int = 2,
@@ -206,10 +206,11 @@ class PPOModule(pl.LightningModule):
 		self.lr = lr
 
 		self.sampler_fn = sampler_fn
-		self.sampler_kwargs = sampler_kwargs if sampler_kwargs is not None else {
-			"start_token_id": self.tokenizer.bos_token_id,
-			"end_token_id": self.tokenizer.eos_token_id,
-		}
+		self.sampler_kwargs = sampler_kwargs if sampler_kwargs is not None else {}
+		self.sampler_kwargs.setdefault("start_token_id", self.tokenizer.bos_token_id)
+		self.sampler_kwargs.setdefault("end_token_id", self.tokenizer.eos_token_id)
+		if self.sampler_fn == nucleus_sampler:
+			self.sampler_kwargs.setdefault("top_p", 0.9)
 
 		self.automatic_optimization = False
 
@@ -278,7 +279,7 @@ class PPOModule(pl.LightningModule):
 				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
 			)
 
-			new_values = self.critic(decoder_output, memory.detach(), src_mask)
+			new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
 			# new_values = self.critic(memory.detach(), src_mask)
 			new_log_probs = new_log_probs.to(old_log_probs.device)
 
@@ -299,7 +300,7 @@ class PPOModule(pl.LightningModule):
 			opt_critic.zero_grad()
 
 
-			actor_loss.backward(retain_graph=True)
+			actor_loss.backward()
 			value_loss.backward()
 
 			torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
