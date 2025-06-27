@@ -3,7 +3,7 @@ import os
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-impore re
+import re
 
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
@@ -42,10 +42,10 @@ from typing import Optional, Callable, Dict, Any
 
 USPTO_CSV_FILE = "USPTO_MIT.csv"
 MAX_LENGTH = 282
-BATCH_SIZE = 8
-NUM_WORKERS = 12
+BATCH_SIZE = 16
+NUM_WORKERS = 10
 NUM_EPOCHS = 10
-CKPT_PATH = "train_checkpoints_server/best-checkpoint-finetune-uspto-sep-bart_small_v8-tanimoto-v8.ckpt"
+CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 
 VALID_SMILES_CHARS_RE = re.compile(r'[^\w\(\)\[\]=\-\#/\+\.@%0-9]')
 INVALID_BOND_SEQUENCE_RE = re.compile(r'==|##|==#|##=')
@@ -161,8 +161,8 @@ class Critic(nn.Module):
 			nn.Linear(self.d_model // 2, 1)
 		)
 
-	def forward(self, decoded_hidden_states, memory, src_mask=None):
-		attn_output = self.cross_attention(
+	def forward(self, decoder_hidden_states, memory, src_mask=None):
+		attn_output = self.cross_attn(
 			query=decoder_hidden_states,
 			key=memory,
 			value=memory,
@@ -175,6 +175,12 @@ class Critic(nn.Module):
 		value = self.value_head(pooled_memory).squeeze(-1)
 
 		return value
+	# def forward(self, memory, src_mask=None):
+	# 	pooled_memory = self.pooler(memory, src_mask)
+	# 	value = self.value_head(pooled_memory).squeeze(-1)
+
+	# 	return value
+
 
 class PPOModule(pl.LightningModule):
 	def __init__(
@@ -182,15 +188,14 @@ class PPOModule(pl.LightningModule):
 		actor: BART | Chemformer,
 		critic: Critic,
 		tokenizer,
-		sampler_fn: Callable = nucleus_sampler,
+		sampler_fn: Callable = greedy_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 1e-5,
 		ppo_epochs: int = 2,
 		clip_epsilon: float = 0.2,
 		vf_coef: float = 0.5,
 		ent_coef: float = 0.01,
-		kl_coef: float = 0.1,
-		tanimoto_scale: float = 500.0, # since max length is close to 300, tanimoto only goese from 0 to 1, increase it by 500 to have more impact compare to grammar reward
+		kl_coef: float = 0.02,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -232,11 +237,13 @@ class PPOModule(pl.LightningModule):
 			)
 
 			values = self.critic(decoder_output_for_value, memory, src_mask)
+			# values = self.critic(memory, src_mask)
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
+		reactant_smiles = self.tokenizer.batch_decode(src_tokens.tolist(), skip_special_tokens=True)
 		target_smiles = self.tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
 
-		tanimoto = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device) * self.hparams.tanimoto_scale
+		tanimoto = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device)
 
 		grammar_rewards = []
 		for b in range(pred_tokens.size(0)):
@@ -245,14 +252,14 @@ class PPOModule(pl.LightningModule):
 					pred_tokens[b, : i + 1].tolist(),
 					skip_special_tokens=True,
 				)
-				for i in range(seq.size(1))
+				for i in range(pred_tokens.size(1))
 			]
 			scores = [
 				intermediate_smiles_reward(pref, reactant_smiles[b])
 				for pref in prefixes
 			]
 			grammar_rewards.append(sum(scores) / len(scores))
-		grammar = torch.tensor(grammar_rewards, device=self.device)
+		grammar = torch.tensor(grammar_rewards, device=self.device) / pred_tokens.size(0)
 
 		rewards = tanimoto + grammar
 
@@ -268,10 +275,11 @@ class PPOModule(pl.LightningModule):
 		actions = pred_tokens.detach()
 		for _ in range(self.hparams.ppo_epochs):
 			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
-				memory, expanded_src_mask, pred_tokens, self.tokenizer.pad_token_id
+				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
 			)
 
 			new_values = self.critic(decoder_output, memory.detach(), src_mask)
+			# new_values = self.critic(memory.detach(), src_mask)
 			new_log_probs = new_log_probs.to(old_log_probs.device)
 
 			# Policy Loss (Clipped Surrogate Objective)
@@ -288,11 +296,14 @@ class PPOModule(pl.LightningModule):
 			value_loss = F.mse_loss(new_values, returns)
 
 			opt_actor.zero_grad()
-			actor_loss.backward(retain_graph=True)
-			opt_actor.step()
-
 			opt_critic.zero_grad()
+
+
+			actor_loss.backward(retain_graph=True)
 			value_loss.backward()
+
+			torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+			opt_actor.step()
 			opt_critic.step()
 
 		self.log_dict({
@@ -513,8 +524,6 @@ trainer = pl.Trainer(
   callbacks=[ckpt_exact, ckpt_reward],
   accelerator='gpu' if torch.cuda.is_available() else 'cpu',
   devices=1,
-	limit_train_batches=0.01,
-	limit_val_batches=0.01,
 )
 
 from rdkit import RDLogger
