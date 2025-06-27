@@ -94,7 +94,7 @@ class BART(Base):
 	def evaluate_actions(
 		self, memory: torch.Tensor, src_mask: torch.Tensor, tgt_tokens: torch.Tensor, pad_token_id: int
 	) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-		if self.freqs_cis.device != src.device:
-			self.freqs_cis = self.freqs_cis.to(src.device)
+		if self.freqs_cis.device != memory.device:
+			self.freqs_cis = self.freqs_cis.to(memory.device)
 
 		return super().evaluate_actions(memory, src_mask, tgt_tokens, pad_token_id)
