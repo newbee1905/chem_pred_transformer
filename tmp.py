@@ -234,9 +234,19 @@ class PPOModule(pl.LightningModule):
 		with torch.no_grad():
 			memory = self.actor.encode(src_tokens, src_mask)
 
-			pred_tokens, old_log_probs = self.sampler_fn(
-				self.actor, memory, src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
+			self.actor.clear_cache()
+
+			pred_tokens = self.sampler_fn(
+				self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
 			)
+
+			self.actor.clear_cache()
+
+			old_log_probs, _, _ = self.actor.evaluate_actions(
+				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
+			)
+			old_log_probs = old_log_probs.detach()
+			old_log_probs = old_log_probs.to(self.device)
 
 			decoder_input_for_value = pred_tokens[:, :-1]
 			decoder_output_for_value = self.actor.decode(
@@ -245,8 +255,6 @@ class PPOModule(pl.LightningModule):
 
 			# values = self.critic(decoder_output_for_value, memory, src_mask)
 			values = self.critic(memory, src_mask)
-
-		self.actor.clear_cache()
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens.tolist(), skip_special_tokens=True)
@@ -297,6 +305,7 @@ class PPOModule(pl.LightningModule):
 			print("!!!!!! FOUND NaN in Advantage AFTER normalization !!!!!!")
 
 		with torch.no_grad():
+			self.actor.clear_cache()
 			temp_new_log_probs, temp_entropy, _ = self.actor.evaluate_actions(memory, src_mask, pred_tokens, self.tokenizer.pad_token_id)
 			temp_ratio = (temp_new_log_probs - old_log_probs).exp()
 			print(f"Ratio (sampled): mean={temp_ratio.mean():.4f}, std={temp_ratio.std():.4f}, min={temp_ratio.min():.4f}, max={temp_ratio.max():.4f}")
@@ -309,14 +318,20 @@ class PPOModule(pl.LightningModule):
 
 		actions = pred_tokens.detach()
 		for _ in range(self.hparams.ppo_epochs):
+			self.actor.clear_cache()
+
 			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
 				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
 			)
 
 			with torch.no_grad():
+				self.actor.clear_cache()
+
 				ref_log_probs, _, _ = self.ref_actor.evaluate_actions(
 					memory.detach(), src_mask, pred_tokens, self.tokenizer.pad_token_id
 				)
+
+			ref_log_probs = ref_log_probs.to(self.device)
 
 			kl_div = (new_log_probs - ref_log_probs).mean()
 
