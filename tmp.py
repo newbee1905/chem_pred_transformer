@@ -308,12 +308,14 @@ class PPOModule(pl.LightningModule):
 			self.actor.clear_cache()
 			temp_new_log_probs, temp_entropy, _ = self.actor.evaluate_actions(memory, src_mask, pred_tokens, self.tokenizer.pad_token_id)
 
-			log_temp_ratio = new_log_probs - old_log_probs
+			log_temp_ratio = temp_new_log_probs - old_log_probs
 			log_temp_ratio_std = temp_log_ratio.std()
 			log_temp_ratio_mean = temp_log_ratio.mean()
 
 			log_temp_ratio_clipped = torch.clamp(
 				temp_log_ratio, 
+				# min=-10,
+				# max=2,
 				min=log_temp_ratio_mean - 3 * log_temp_ratio_std,
 				max=log_temp_ratio_mean + 3 * log_temp_ratio_std
 			)
@@ -359,6 +361,8 @@ class PPOModule(pl.LightningModule):
 
 			log_ratio_clipped = torch.clamp(
 				log_ratio, 
+				# min=-10,
+				# max=2,
 				min=log_ratio_mean - 3 * log_ratio_std,
 				max=log_ratio_mean + 3 * log_ratio_std
 			)
