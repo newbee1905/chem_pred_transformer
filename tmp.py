@@ -309,15 +309,15 @@ class PPOModule(pl.LightningModule):
 			temp_new_log_probs, temp_entropy, _ = self.actor.evaluate_actions(memory, src_mask, pred_tokens, self.tokenizer.pad_token_id)
 
 			log_temp_ratio = temp_new_log_probs - old_log_probs
-			log_temp_ratio_std = log_temp_ratio.std()
-			log_temp_ratio_mean = log_temp_ratio.mean()
+			# log_temp_ratio_std = log_temp_ratio.std()
+			# log_temp_ratio_mean = log_temp_ratio.mean()
 
 			log_temp_ratio_clipped = torch.clamp(
 				log_temp_ratio, 
-				# min=-10,
-				# max=2,
-				min=log_temp_ratio_mean - 3 * log_temp_ratio_std,
-				max=log_temp_ratio_mean + 3 * log_temp_ratio_std
+				min=-3,
+				max=3,
+				# min=log_temp_ratio_mean - 3 * log_temp_ratio_std,
+				# max=log_temp_ratio_mean + 3 * log_temp_ratio_std
 			)
 
 			temp_ratio = log_temp_ratio.exp().to(adv.device)
@@ -356,15 +356,15 @@ class PPOModule(pl.LightningModule):
 
 			# Policy Loss (Clipped Surrogate Objective)
 			log_ratio = new_log_probs - old_log_probs
-			log_ratio_std = log_ratio.std()
-			log_ratio_mean = log_ratio.mean()
+			# log_ratio_std = log_ratio.std()
+			# log_ratio_mean = log_ratio.mean()
 
 			log_ratio_clipped = torch.clamp(
 				log_ratio, 
-				# min=-10,
-				# max=2,
-				min=log_ratio_mean - 3 * log_ratio_std,
-				max=log_ratio_mean + 3 * log_ratio_std
+				min=-3,
+				max=3,
+				# min=log_ratio_mean - 3 * log_ratio_std,
+				# max=log_ratio_mean + 3 * log_ratio_std
 			)
 
 			ratio = log_ratio.exp().to(adv.device)
