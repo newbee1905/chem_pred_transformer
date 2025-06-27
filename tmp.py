@@ -274,6 +274,32 @@ class PPOModule(pl.LightningModule):
 		# Normalize advantages for training stability 
 		adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
 
+		print(f"\n--- DEBUGGING at Epoch {self.current_epoch}, Batch Index {batch_idx} ---")
+		print(f"Rewards:	   mean={rewards.mean():.4f}, std={rewards.std():.4f}, min={rewards.min():.4f}, max={rewards.max():.4f}")
+		print(f"Values (critic): mean={values.mean():.4f}, std={values.std():.4f}, min={values.min():.4f}, max={values.max():.4f}")
+		print(f"Returns:	   mean={returns.mean():.4f}, std={returns.std():.4f}, min={returns.min():.4f}, max={returns.max():.4f}")
+		
+		adv_before_norm = (returns - values).detach()
+		print(f"Adv (pre-norm):  mean={adv_before_norm.mean():.4f}, std={adv_before_norm.std():.4f}, min={adv_before_norm.min():.4f}, max={adv_before_norm.max():.4f}")
+		if torch.isnan(adv_before_norm).any():
+			print("!!!!!! FOUND NaN in Advantage BEFORE normalization !!!!!!")
+
+		adv_std_val = adv_before_norm.std(unbiased=False)
+		if adv_std_val < 1e-8:
+			print(f"!!!!!! WARNING: Advantage STD is very low ({adv_std_val:.2e}), potential division by zero !!!!!!")
+
+		print(f"Adv (post-norm): mean={adv.mean():.4f}, std={adv.std():.4f}, min={adv.min():.4f}, max={adv.max():.4f}")
+		if torch.isnan(adv).any():
+			print("!!!!!! FOUND NaN in Advantage AFTER normalization !!!!!!")
+
+		with torch.no_grad():
+			temp_new_log_probs, temp_entropy, _ = self.actor.evaluate_actions(memory, src_mask, pred_tokens, self.tokenizer.pad_token_id)
+			temp_ratio = (temp_new_log_probs - old_log_probs).exp()
+			print(f"Ratio (sampled): mean={temp_ratio.mean():.4f}, std={temp_ratio.std():.4f}, min={temp_ratio.min():.4f}, max={temp_ratio.max():.4f}")
+			if torch.isinf(temp_ratio).any():
+				print("!!!!!! FOUND INF in Ratio calculation !!!!!!")
+		print(f"--- END DEBUGGING ---")
+
 		self.actor.train()
 		self.critic.train()
 
@@ -312,7 +338,7 @@ class PPOModule(pl.LightningModule):
 			actor_loss.backward()
 			value_loss.backward()
 
-			torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+			torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
 			opt_actor.step()
 			opt_critic.step()
 
