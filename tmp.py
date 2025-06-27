@@ -196,7 +196,7 @@ class PPOModule(pl.LightningModule):
 		clip_epsilon: float = 0.2,
 		vf_coef: float = 0.5,
 		ent_coef: float = 0.01,
-		kl_coef: float = 0.1,
+		kl_coef: float = 0.05,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
