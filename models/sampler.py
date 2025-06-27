@@ -219,7 +219,7 @@ def nucleus_sampler(
 
 		next_token = torch.multinomial(probs, num_samples=1)
 		if return_logpi:
-			log_pi += torch.log(probs.gather(1, next_token).squeeze(1))
+			log_pi += torch.log(probs.gather(1, next_token).squeeze(1) + 1e-9)
 
 		next_token = torch.where(
 			finished.unsqueeze(-1),

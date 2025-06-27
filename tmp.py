@@ -195,7 +195,6 @@ class PPOModule(pl.LightningModule):
 		clip_epsilon: float = 0.2,
 		vf_coef: float = 0.5,
 		ent_coef: float = 0.01,
-		kl_coef: float = 0.02,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -260,7 +259,7 @@ class PPOModule(pl.LightningModule):
 				for pref in prefixes
 			]
 			grammar_rewards.append(sum(scores) / len(scores))
-		grammar = torch.tensor(grammar_rewards, device=self.device) / pred_tokens.size(0)
+		grammar = torch.tensor(grammar_rewards, device=self.device)
 
 		rewards = tanimoto + grammar
 
@@ -289,9 +288,7 @@ class PPOModule(pl.LightningModule):
 			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
 			policy_loss = -torch.min(s1, s2).mean()
 
-			kl = (old_log_probs - new_log_probs).mean()
-
-			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl
+			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean()
 
 			# Value Function Loss
 			value_loss = F.mse_loss(new_values, returns)
