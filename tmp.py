@@ -244,6 +244,8 @@ class PPOModule(pl.LightningModule):
 			# values = self.critic(decoder_output_for_value, memory, src_mask)
 			values = self.critic(memory, src_mask)
 
+		self.actor.clear_cache()
+
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens.tolist(), skip_special_tokens=True)
 		target_smiles = self.tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
