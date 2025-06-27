@@ -298,15 +298,15 @@ class PPOModule(pl.LightningModule):
 
 		adv_std_val = adv_before_norm.std(unbiased=False)
 		if adv_std_val < 1e-8:
-		  print(f"!!!!!! WARNING: Advantage STD is very low ({adv_std_val:.2e}), potential division by zero !!!!!!")
+			print(f"!!!!!! WARNING: Advantage STD is very low ({adv_std_val:.2e}), potential division by zero !!!!!!")
 
 		print(f"Adv (post-norm): mean={adv.mean():.4f}, std={adv.std():.4f}, min={adv.min():.4f}, max={adv.max():.4f}")
 		if torch.isnan(adv).any():
-		  print("!!!!!! FOUND NaN in Advantage AFTER normalization !!!!!!")
+			print("!!!!!! FOUND NaN in Advantage AFTER normalization !!!!!!")
 
 		with torch.no_grad():
-		  self.actor.clear_cache()
-		  temp_new_log_probs, temp_entropy, _ = self.actor.evaluate_actions(memory, src_mask, pred_tokens, self.tokenizer.pad_token_id)
+			self.actor.clear_cache()
+			temp_new_log_probs, temp_entropy, _ = self.actor.evaluate_actions(memory, src_mask, pred_tokens, self.tokenizer.pad_token_id)
 
 			log_temp_ratio = new_log_probs - old_log_probs
 			log_temp_ratio_std = temp_log_ratio.std()
@@ -320,8 +320,8 @@ class PPOModule(pl.LightningModule):
 
 			temp_ratio = log_temp_ratio.exp().to(adv.device)
 
-		  print(f"Ratio (sampled): mean={temp_ratio.mean():.4f}, std={temp_ratio.std():.4f}, min={temp_ratio.min():.4f}, max={temp_ratio.max():.4f}")
-		  if torch.isinf(temp_ratio).any():
+			print(f"Ratio (sampled): mean={temp_ratio.mean():.4f}, std={temp_ratio.std():.4f}, min={temp_ratio.min():.4f}, max={temp_ratio.max():.4f}")
+			if torch.isinf(temp_ratio).any():
 		 	 print("!!!!!! FOUND INF in Ratio calculation !!!!!!")
 		print(f"--- END DEBUGGING ---")
 
@@ -381,7 +381,9 @@ class PPOModule(pl.LightningModule):
 			actor_loss.backward()
 			value_loss.backward()
 
-			torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
+			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
+			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+
 			opt_actor.step()
 			opt_critic.step()
 
