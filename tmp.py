@@ -148,10 +148,10 @@ class Critic(nn.Module):
 		self.d_model = d_model
 		self.n_heads = n_heads
 
-		self.cross_attn = KVCacheMHA(
-			d_model=self.d_model,
-			n_heads=self.n_heads
-		)
+		# self.cross_attn = KVCacheMHA(
+		# 	d_model=self.d_model,
+		# 	n_heads=self.n_heads
+		# )
 
 		self.pooler = AttentionPooler(self.d_model)
 
@@ -161,25 +161,25 @@ class Critic(nn.Module):
 			nn.Linear(self.d_model // 2, 1)
 		)
 
-	def forward(self, decoder_hidden_states, memory, src_mask=None):
-		attn_output = self.cross_attn(
-			query=decoder_hidden_states,
-			key=memory,
-			value=memory,
-			attn_mask=src_mask,
-			is_causal=False,
-			kv_cache=False,
-		)
+	# def forward(self, decoder_hidden_states, memory, src_mask=None):
+	# 	attn_output = self.cross_attn(
+	# 		query=decoder_hidden_states,
+	# 		key=memory,
+	# 		value=memory,
+	# 		attn_mask=src_mask,
+	# 		is_causal=False,
+	# 		kv_cache=False,
+	# 	)
 
-		pooled_memory = self.pooler(attn_output)
-		value = self.value_head(pooled_memory).squeeze(-1)
-
-		return value
-	# def forward(self, memory, src_mask=None):
-	# 	pooled_memory = self.pooler(memory, src_mask)
+	# 	pooled_memory = self.pooler(attn_output)
 	# 	value = self.value_head(pooled_memory).squeeze(-1)
 
 	# 	return value
+	def forward(self, memory, src_mask=None):
+		pooled_memory = self.pooler(memory, src_mask)
+		value = self.value_head(pooled_memory).squeeze(-1)
+
+		return value
 
 
 class PPOModule(pl.LightningModule):
@@ -203,6 +203,11 @@ class PPOModule(pl.LightningModule):
 		self.critic = critic
 		self.tokenizer = tokenizer
 		self.lr = lr
+
+		self.ref_actor = copy.deepcopy(self.actor)
+		for param in self.ref_actor.parameters():
+			param.requires_grad = False
+		self.ref_actor.eval()
 
 		self.sampler_fn = sampler_fn
 		self.sampler_kwargs = sampler_kwargs if sampler_kwargs is not None else {}
@@ -236,8 +241,8 @@ class PPOModule(pl.LightningModule):
 				decoder_input_for_value, memory, memory_mask=src_mask
 			)
 
-			values = self.critic(decoder_output_for_value, memory, src_mask)
-			# values = self.critic(memory, src_mask)
+			# values = self.critic(decoder_output_for_value, memory, src_mask)
+			values = self.critic(memory, src_mask)
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens.tolist(), skip_special_tokens=True)
@@ -278,8 +283,15 @@ class PPOModule(pl.LightningModule):
 				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
 			)
 
-			new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
-			# new_values = self.critic(memory.detach(), src_mask)
+			with torch.no_grad():
+				ref_log_probs, _, _ = self.ref_actor.evaluate_actions(
+					memory.detach(), src_mask, pred_tokens, self.tokenizer.pad_token_id
+				)
+
+			kl_div = (new_log_probs - ref_log_probs).mean()
+
+			# new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
+			new_values = self.critic(memory.detach(), src_mask)
 			new_log_probs = new_log_probs.to(old_log_probs.device)
 
 			# Policy Loss (Clipped Surrogate Objective)
@@ -288,7 +300,7 @@ class PPOModule(pl.LightningModule):
 			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
 			policy_loss = -torch.min(s1, s2).mean()
 
-			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean()
+			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl_div
 
 			# Value Function Loss
 			value_loss = F.mse_loss(new_values, returns)
