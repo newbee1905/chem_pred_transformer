@@ -234,17 +234,12 @@ class PPOModule(pl.LightningModule):
 
 			self.actor.clear_cache()
 
-			pred_tokens = self.sampler_fn(
-				self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
-			)
-
-			self.actor.clear_cache()
-
-			old_log_probs, _, _ = self.actor.evaluate_actions(
-				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
+			pred_tokens, old_log_probs = self.sampler_fn(
+				self.actor, memory, src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
 			)
 			old_log_probs = old_log_probs.detach()
-			old_log_probs = old_log_probs.to(self.device)
+
+			self.actor.clear_cache()
 
 			decoder_input_for_value = pred_tokens[:, :-1]
 			decoder_output_for_value = self.actor.decode(
@@ -523,7 +518,7 @@ class GRPOModule(pl.LightningModule):
 			# Generate G sequences for each original input
 			# pred_tokens shape: [B * G, OutSeqLen]
 			# old_log_probs shape: [B * G]
-			pred_tokens, old_log_probs, _ = self.sampler_fn(
+			pred_tokens, old_log_probs = self.sampler_fn(
 				self.actor, memory, expanded_src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
 			)
 
