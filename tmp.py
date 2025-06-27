@@ -232,9 +232,16 @@ class PPOModule(pl.LightningModule):
 		with torch.no_grad():
 			memory = self.actor.encode(src_tokens, src_mask)
 
-			pred_tokens, old_log_probs = self.sampler_fn(
-				self.actor, memory, src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
+			pred_tokens = self.sampler_fn(
+				self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
 			)
+
+			self.actor.clear_cache()
+
+			old_log_probs, _, _ = self.actor.evaluate_actions(
+				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
+			)
+			old_log_probs = old_log_probs.detach()
 
 			decoder_input_for_value = pred_tokens[:, :-1]
 			decoder_output_for_value = self.actor.decode(
@@ -243,8 +250,6 @@ class PPOModule(pl.LightningModule):
 
 			# values = self.critic(decoder_output_for_value, memory, src_mask)
 			values = self.critic(memory, src_mask)
-
-		self.actor.clear_cache()
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens.tolist(), skip_special_tokens=True)
