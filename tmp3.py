@@ -7,6 +7,7 @@ from models.bart import BART
 from models.sampler import nucleus_sampler
 from tokenisers.neochem import ChemformerTokenizerFast
 from dataset.uspto import USPTODataset
+from dataset.base import BARTDataCollator
 from metrics import compute_batch_tanimoto_rewards
 from torch.utils.data import DataLoader
 
@@ -21,12 +22,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = ChemformerTokenizerFast("bart_vocab.json")
 vocab_size = tokenizer.vocab_size
 
-max_length = collator.max_length
-
 collator = BARTDataCollator(tokenizer=tokenizer, max_length=MAX_LENGTH)
 
 ds = USPTODataset(USPTO_CSV_FILE, tokenizer, mode="sep")
 dl = DataLoader(ds, batch_size=BATCH_SIZE)
+
+max_length = collator.max_length
 
 print(f"Loaded {len(source_dataset)} source reactants.")
 
