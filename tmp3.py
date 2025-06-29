@@ -16,9 +16,31 @@ OUTPUT_FILE = "reward_data_with_hidden_states.joblib"
 GENERATIONS_PER_REACTANT = 5
 BATCH_SIZE = 16
 
-print("Loading model and tokenizer...")
+print("Loading dataset and tokenizer...")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = ChemformerTokenizerFast("bart_vocab.json")
+vocab_size = tokenizer.vocab_size
+
+max_length = collator.max_length
+
+collator = BARTDataCollator(tokenizer=tokenizer, max_length=MAX_LENGTH)
+
+ds = USPTODataset(USPTO_CSV_FILE, tokenizer, mode="sep")
+dl = DataLoader(ds, batch_size=BATCH_SIZE)
+
+print(f"Loaded {len(source_dataset)} source reactants.")
+
+
+MODEL_CONFIG = {
+	"vocab_size": vocab_size,
+	"d_model": 512,
+	"n_layers": 6,
+	"n_heads": 8,
+	"d_ff": 2048,
+	"dropout": 0.1,
+	"max_seq_len": max_length,
+	"aux_head": False,
+}
 
 untrained_bart_nn_module = BART(**MODEL_CONFIG)
 
@@ -32,11 +54,6 @@ print("Model loaded successfully.")
 
 actor = lightning_model.model
 actor = actor.eval()
-
-ds = USPTODataset(USPTO_CSV_FILE, tokenizer, mode="sep")
-dl = DataLoader(ds, batch_size=BATCH_SIZE)
-
-print(f"Loaded {len(source_dataset)} source reactants.")
 
 all_data = []
 for batch in tqdm(source_loader, desc="Generating reward data"):
