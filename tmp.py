@@ -148,10 +148,10 @@ class Critic(nn.Module):
 		self.d_model = d_model
 		self.n_heads = n_heads
 
-		# self.cross_attn = KVCacheMHA(
-		# 	d_model=self.d_model,
-		# 	n_heads=self.n_heads
-		# )
+		self.cross_attn = KVCacheMHA(
+			d_model=self.d_model,
+			n_heads=self.n_heads
+		)
 
 		self.pooler = AttentionPooler(self.d_model)
 
@@ -161,25 +161,25 @@ class Critic(nn.Module):
 			nn.Linear(self.d_model // 2, 1)
 		)
 
-	# def forward(self, decoder_hidden_states, memory, src_mask=None):
-	# 	attn_output = self.cross_attn(
-	# 		query=decoder_hidden_states,
-	# 		key=memory,
-	# 		value=memory,
-	# 		attn_mask=src_mask,
-	# 		is_causal=False,
-	# 		kv_cache=False,
-	# 	)
+	def forward(self, decoder_hidden_states, memory, src_mask=None):
+		attn_output = self.cross_attn(
+			query=decoder_hidden_states,
+			key=memory,
+			value=memory,
+			attn_mask=src_mask,
+			is_causal=False,
+			kv_cache=False,
+		)
 
-	# 	pooled_memory = self.pooler(attn_output)
-	# 	value = self.value_head(pooled_memory).squeeze(-1)
-
-	# 	return value
-	def forward(self, memory, src_mask=None):
-		pooled_memory = self.pooler(memory, src_mask)
+		pooled_memory = self.pooler(attn_output)
 		value = self.value_head(pooled_memory).squeeze(-1)
 
 		return value
+	# def forward(self, memory, src_mask=None):
+	# 	pooled_memory = self.pooler(memory, src_mask)
+	# 	value = self.value_head(pooled_memory).squeeze(-1)
+
+	# 	return value
 
 
 
