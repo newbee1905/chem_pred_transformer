@@ -60,7 +60,7 @@ actor = lightning_model.model
 actor = actor.eval()
 
 all_data = []
-for batch in tqdm(source_loader, desc="Generating reward data"):
+for batch in tqdm(dl, desc="Generating reward data"):
 	src_tokens = batch['input_ids'].to(device)
 	src_mask = batch['attention_mask'].to(device).eq(0)
 	tgt_tokens = batch['labels'] 
