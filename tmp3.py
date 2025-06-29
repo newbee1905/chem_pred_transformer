@@ -31,7 +31,7 @@ dl = DataLoader(ds, batch_size=BATCH_SIZE)
 
 max_length = collator.max_length
 
-print(f"Loaded {len(source_dataset)} source reactants.")
+print(f"Loaded {len(ds)} source reactants.")
 
 
 MODEL_CONFIG = {
