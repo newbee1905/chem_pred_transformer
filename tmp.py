@@ -240,7 +240,7 @@ class PPOModule(pl.LightningModule):
 			# )
 			# old_log_probs = old_log_probs.detach()
 
-			pred_tokens, = self.sampler_fn(
+			pred_tokens = self.sampler_fn(
 				self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
 			)
 
