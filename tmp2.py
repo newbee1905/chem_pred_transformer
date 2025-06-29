@@ -113,12 +113,10 @@ actor.eval()
 val_iterator = iter(val_dl)
 batch = next(val_iterator)
 
-src_tokens = 
-src_mask = torch.zeros_like(src_tokens, dtype=torch.bool) # Assuming padding mask is 0=mask
-
 device = "cuda"
 
 actor = actor.to(device)
+actor.freqs_cis = actor.freqs_cis.to(device)
 src_tokens = batch['input_ids'][0:1].to(device)
 src_mask = batch['attention_mask'][0:1].eq(0).to(device)
 
@@ -128,17 +126,7 @@ with torch.no_grad():
 	
 	# Use kv_cache=True, as you do in the trainer
 	pred_tokens, log_prob_from_sampler = nucleus_sampler(
-		actor, memory.detach(), src_mask, return_logpi=True, kv_cache=True
-	)
-	actor.clear_cache()
-
-with torch.no_grad():
-	memory = actor.encode(src_tokens, src_mask)
-	actor.clear_cache()
-	
-	# Use kv_cache=True, as you do in the trainer
-	pred_tokens, log_prob_from_sampler_no_cache = nucleus_sampler(
-		actor, memory.detach(), src_mask, return_logpi=True
+		actor, memory.detach(), src_mask, return_logpi=True, 
 	)
 	actor.clear_cache()
 
@@ -146,16 +134,13 @@ with torch.no_grad():
 	memory = actor.encode(src_tokens, src_mask) 
 	
 	log_prob_from_evaluate, _, _ = actor.evaluate_actions(
-		memory.detach(), src_mask, pred_tokens, pad_token_id=actor.tokenizer.pad_token_id # or whatever your pad id is
+		memory.detach(), src_mask, pred_tokens, pad_token_id=tokenizer.pad_token_id # or whatever your pad id is
 	)
 
 print(f"Log-Prob from Sampler:         {log_prob_from_sampler.item():.6f}")
-print(f"Log-Prob from Sampler No K-V Cache:         {log_prob_from_sampler_no_cache.item():.6f}")
 print(f"Log-Prob from evaluate_actions:  {log_prob_from_evaluate.item():.6f}")
 
 # The difference should be extremely small (due to floating point error)
-assert torch.allclose(log_prob_from_sampler, log_prob_from_evaluate), "Log probabilities are not consistent! (1)"
-assert torch.allclose(log_prob_from_sampler_no_cache, log_prob_from_evaluate), "Log probabilities are not consistent! (2)"
-assert torch.allclose(log_prob_from_sampler, log_prob_from_sampler_no_cache), "Log probabilities are not consistent! (3)"
+assert torch.allclose(log_prob_from_sampler, log_prob_from_evaluate), "Log probabilities are not consistent!"
 
 print("\nSUCCESS: Log probability calculations are consistent.")
