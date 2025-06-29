@@ -235,12 +235,21 @@ class PPOModule(pl.LightningModule):
 
 			self.actor.clear_cache()
 
-			pred_tokens, old_log_probs = self.sampler_fn(
-				self.actor, memory, src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
+			# pred_tokens, old_log_probs = self.sampler_fn(
+			# 	self.actor, memory, src_mask, return_logpi=True, kv_cache=True, **self.sampler_kwargs
+			# )
+			# old_log_probs = old_log_probs.detach()
+
+			pred_tokens, = self.sampler_fn(
+				self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
 			)
-			old_log_probs = old_log_probs.detach()
 
 			self.actor.clear_cache()
+
+			old_log_probs, _, _ = self.actor.evaluate_actions(
+				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
+			)
+			old_log_probs = old_log_probs.detach()
 
 			decoder_input_for_value = pred_tokens[:, :-1]
 			decoder_output_for_value = self.actor.decode(
@@ -308,8 +317,8 @@ class PPOModule(pl.LightningModule):
 
 			log_temp_ratio = torch.clamp(
 				log_temp_ratio, 
-				min=-3,
-				max=3,
+				min=-5,
+				max=5,
 				# min=log_temp_ratio_mean - 3 * log_temp_ratio_std,
 				# max=log_temp_ratio_mean + 3 * log_temp_ratio_std
 			)
@@ -355,8 +364,8 @@ class PPOModule(pl.LightningModule):
 
 			log_ratio = torch.clamp(
 				log_ratio, 
-				min=-3,
-				max=3,
+				min=-5,
+				max=5,
 				# min=log_ratio_mean - 3 * log_ratio_std,
 				# max=log_ratio_mean + 3 * log_ratio_std
 			)
@@ -379,8 +388,8 @@ class PPOModule(pl.LightningModule):
 			actor_loss.backward()
 			value_loss.backward()
 
-			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
-			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1)
+			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1)
 
 			opt_actor.step()
 			opt_critic.step()
@@ -390,6 +399,9 @@ class PPOModule(pl.LightningModule):
 			'train/actor_loss':  actor_loss,
 			"train/value_loss": value_loss,
 			"train/mean_reward": rewards.mean(),
+			"train/entropy": entropy.mean().item(),
+			"train/kl_div": kl_div.item(),
+			"train/ratio_mean": ratio.mean().item()
 		}, prog_bar=True, on_step=True, on_epoch=False)
 
 	def validation_step(self, batch: dict, batch_idx: int):
