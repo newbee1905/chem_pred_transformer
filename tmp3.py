@@ -12,7 +12,7 @@ from metrics import compute_batch_tanimoto_rewards
 from torch.utils.data import DataLoader
 
 CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
-SOURCE_DATA_FILE = "USPTO_MIT.csv"
+USPTO_CSV_FILE = "USPTO_MIT.csv"
 OUTPUT_FILE = "reward_data_with_hidden_states.joblib"
 GENERATIONS_PER_REACTANT = 5
 BATCH_SIZE = 16
