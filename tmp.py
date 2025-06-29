@@ -193,8 +193,8 @@ class PPOModule(pl.LightningModule):
 		lr: float = 1e-5,
 		ppo_epochs: int = 2,
 		clip_epsilon: float = 0.2,
-		vf_coef: float = 0.5,
 		ent_coef: float = 0.01,
+		kl_coef: float = 0.5,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -305,7 +305,7 @@ class PPOModule(pl.LightningModule):
 			# log_temp_ratio_std = log_temp_ratio.std()
 			# log_temp_ratio_mean = log_temp_ratio.mean()
 
-			log_temp_ratio_clipped = torch.clamp(
+			log_temp_ratio = torch.clamp(
 				log_temp_ratio, 
 				min=-3,
 				max=3,
@@ -352,7 +352,7 @@ class PPOModule(pl.LightningModule):
 			# log_ratio_std = log_ratio.std()
 			# log_ratio_mean = log_ratio.mean()
 
-			log_ratio_clipped = torch.clamp(
+			log_ratio = torch.clamp(
 				log_ratio, 
 				min=-3,
 				max=3,
