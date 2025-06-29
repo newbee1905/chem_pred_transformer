@@ -352,6 +352,7 @@ class PPOModule(pl.LightningModule):
 			ref_log_probs = ref_log_probs.to(self.device)
 
 			kl_div = (new_log_probs - ref_log_probs).mean()
+			kl_penalty = F.relu(kl_div)
 
 			# new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
 			new_values = self.critic(memory.detach(), src_mask)
@@ -376,7 +377,7 @@ class PPOModule(pl.LightningModule):
 			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
 			policy_loss = -torch.min(s1, s2).mean()
 
-			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl_div
+			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl_penalty
 
 			# Value Function Loss
 			value_loss = F.mse_loss(new_values, returns)
