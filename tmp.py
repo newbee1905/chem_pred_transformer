@@ -189,7 +189,7 @@ class PPOModule(pl.LightningModule):
 		actor: BART | Chemformer,
 		critic: Critic,
 		tokenizer,
-		sampler_fn: Callable = greedy_sampler,
+		sampler_fn: Callable = nucleus_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 1e-6,
 		ppo_epochs: int = 4,

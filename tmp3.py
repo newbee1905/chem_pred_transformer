@@ -22,6 +22,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = ChemformerTokenizerFast("bart_vocab.json")
 vocab_size = tokenizer.vocab_size
 
+MAX_LENGTH = 282
+
 collator = BARTDataCollator(tokenizer=tokenizer, max_length=MAX_LENGTH)
 
 ds = USPTODataset(USPTO_CSV_FILE, tokenizer, mode="sep")
