@@ -188,8 +188,7 @@ class Base(nn.Module):
 		return logits.transpose(0, 1), aux_preds
 
 	def evaluate_actions(
-		self, memory: torch.Tensor, src_mask: torch.Tensor, tgt_tokens: torch.Tensor, pad_token_id: int,
-		**decode_kwargs 
+		self, memory: torch.Tensor, src_mask: torch.Tensor, tgt_tokens: torch.Tensor, pad_token_id: int
 	) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 		"""
 		Evaluates the log-probabilities and entropy of a given sequence of actions.
@@ -197,14 +196,8 @@ class Base(nn.Module):
 		decoder_input = tgt_tokens[:, :-1]
 		labels = tgt_tokens[:, 1:]
 
-		decoder_output = self.decode(
-			tgt=decoder_input,
-			memory=memory,
-			memory_mask=src_mask,
-			**decode_kwargs
-		)
-		
-		logits = self.token_fc(decoder_output).transpose(0, 1) # Shape: [bsz, seq - 1, vocab_sz]
+		decoder_output = self.decode(tgt=decoder_input, memory=memory, memory_mask=src_mask)
+		logits = self.token_fc(decoder_output).transpose(0, 1) # Shape: [Batch, SeqLen-1, VocabSize]
 
 		log_probs_dist = F.log_softmax(logits, dim=-1)
 		gathered_log_probs = torch.gather(log_probs_dist, 2, labels.unsqueeze(-1)).squeeze(-1)
