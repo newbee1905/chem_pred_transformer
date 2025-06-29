@@ -90,7 +90,7 @@ for batch in tqdm(dl, desc="Generating reward data"):
 			pad_token_id=tokenizer.pad_token_id
 		) # Shape: [seq - 1, bsz * G, d_model]
 
-	target_smiles_list = tokenizer.batch_decode(tgt_tokens_for_reward.tolist(), skip_special_tokens=True)
+	target_smiles_list = tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
 	generated_smiles_list = tokenizer.batch_decode(generated_tokens.tolist(), skip_special_tokens=True)
 	expanded_targets_str = [t for t in target_smiles_list for _ in range(GENERATIONS_PER_REACTANT)]
 	scores = compute_batch_tanimoto_rewards(generated_smiles_list, expanded_targets_str, device=device)
