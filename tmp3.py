@@ -3,6 +3,7 @@ import joblib
 from tqdm import tqdm
 import numpy as np
 
+from trainer.bart import BARTModel
 from models.bart import BART
 from models.sampler import nucleus_sampler
 from tokenisers.neochem import ChemformerTokenizerFast
