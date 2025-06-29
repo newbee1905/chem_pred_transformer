@@ -95,7 +95,7 @@ MODEL_CONFIG = {
 	"n_layers": 6,
 	"n_heads": 8,
 	"d_ff": 2048,
-	"dropout": 0.1,
+	"dropout": 0,
 	"max_seq_len": max_length,
 	"aux_head": False,
 }
@@ -191,11 +191,11 @@ class PPOModule(pl.LightningModule):
 		tokenizer,
 		sampler_fn: Callable = nucleus_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
-		lr: float = 1e-6,
-		ppo_epochs: int = 4,
+		lr: float = 5e-6,
+		ppo_epochs: int = 2,
 		clip_epsilon: float = 0.2,
 		ent_coef: float = 0.01,
-		kl_coef: float = 0.5,
+		kl_coef: float = 0.05,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -388,8 +388,8 @@ class PPOModule(pl.LightningModule):
 			actor_loss.backward()
 			value_loss.backward()
 
-			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1)
-			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1)
+			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
+			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
 
 			opt_actor.step()
 			opt_critic.step()
@@ -500,8 +500,8 @@ class GRPOModule(pl.LightningModule):
 		tokenizer,
 		sampler_fn: Callable = nucleus_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
-		lr: float = 1e-5,
-		ppo_epochs: int = 4,
+		lr: float = 5e-6,
+		ppo_epochs: int = 2,
 		clip_epsilon: float = 0.2,
 		ent_coef: float = 0.01,
 		num_generations_g: int = 4,
