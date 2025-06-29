@@ -20,8 +20,18 @@ print("Loading model and tokenizer...")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = ChemformerTokenizerFast("bart_vocab.json")
 
-actor_model = BART.load_from_checkpoint(CKPT_PATH).model.to(device)
-actor_model.eval()
+untrained_bart_nn_module = BART(**MODEL_CONFIG)
+
+print("Loading trained LightningModule from checkpoint...")
+lightning_model = BARTModel.load_from_checkpoint(
+	checkpoint_path=CKPT_PATH,
+	model=untrained_bart_nn_module,
+	tokenizer=tokenizer
+)
+print("Model loaded successfully.")
+
+actor = lightning_model.model
+actor = actor.eval()
 
 ds = USPTODataset(USPTO_CSV_FILE, tokenizer, mode="sep")
 dl = DataLoader(ds, batch_size=BATCH_SIZE)
@@ -38,15 +48,15 @@ for batch in tqdm(source_loader, desc="Generating reward data"):
 	expanded_src_mask = src_mask.repeat_interleave(GENERATIONS_PER_REACTANT, dim=0)
 
 	with torch.no_grad():
-		generated_tokens = actor_model.generate(
+		generated_tokens = actor.generate(
 			src=expanded_src_tokens,
 			src_mask=expanded_src_mask,
 			sampler=nucleus_sampler,
 			top_p=0.9
 		) # Shape: [bsz * G, SeqLen_tgt]
 
-		memory = actor_model.encode(expanded_src_tokens, expanded_src_mask)
-		_, _, decoder_hidden_states = actor_model.evaluate_actions(
+		memory = actor.encode(expanded_src_tokens, expanded_src_mask)
+		_, _, decoder_hidden_states = actor.evaluate_actions(
 			memory=memory,
 			src_mask=expanded_src_mask,
 			tgt_tokens=generated_tokens,
