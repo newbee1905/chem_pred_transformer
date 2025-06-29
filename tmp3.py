@@ -28,7 +28,13 @@ MAX_LENGTH = 282
 collator = BARTDataCollator(tokenizer=tokenizer, max_length=MAX_LENGTH)
 
 ds = USPTODataset(USPTO_CSV_FILE, tokenizer, mode="sep")
-dl = DataLoader(ds, batch_size=BATCH_SIZE)
+dl = DataLoader(
+	ds,
+	batch_size=BATCH_SIZE,
+	shuffle=True,
+	num_workers=10,
+	collate_fn=collator,
+)
 
 max_length = collator.max_length
 
