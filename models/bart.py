@@ -97,4 +97,6 @@ class BART(Base):
 		if self.freqs_cis.device != memory.device:
 			self.freqs_cis = self.freqs_cis.to(memory.device)
 
-		return super().evaluate_actions(memory, src_mask, tgt_tokens, pad_token_id)
+		decode_kwargs = {'freqs_cis': self.freqs_cis}
+
+		return super().evaluate_actions(memory, src_mask, tgt_tokens, pad_token_id, **decode_kwargs)
