@@ -1,7 +1,12 @@
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
+
 import torch
 import joblib
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import numpy as np
+import lmdb  # NEW: Import lmdb
+import pickle # NEW: Import pickle
 
 from trainer.bart import BARTModel
 from models.bart import BART
@@ -14,9 +19,10 @@ from torch.utils.data import DataLoader
 
 CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 USPTO_CSV_FILE = "USPTO_MIT.csv"
-OUTPUT_FILE = "reward_data_with_hidden_states.joblib"
+OUTPUT_DB_PATH = "reward_data.lmdb" 
 GENERATIONS_PER_REACTANT = 5
 BATCH_SIZE = 16
+LMDB_MAP_SIZE = 1024**4
 
 print("Loading dataset and tokenizer...")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -37,10 +43,9 @@ dl = DataLoader(
 )
 
 max_length = collator.max_length
-
 print(f"Loaded {len(ds)} source reactants.")
 
-
+# --- Model Loading ---
 MODEL_CONFIG = {
 	"vocab_size": vocab_size,
 	"d_model": 512,
@@ -65,11 +70,14 @@ print("Model loaded successfully.")
 actor = lightning_model.model
 actor = actor.eval()
 
-all_data = []
-for batch in tqdm(dl, desc="Generating reward data"):
+print(f"Setting up LMDB database at {OUTPUT_DB_PATH}...")
+env = lmdb.open(OUTPUT_DB_PATH, map_size=LMDB_MAP_SIZE, writemap=True)
+data_idx = 0
+
+for batch in tqdm(dl, desc="Generating and saving reward data"):
 	src_tokens = batch['input_ids'].to(device)
 	src_mask = batch['attention_mask'].to(device).eq(0)
-	tgt_tokens = batch['labels'] 
+	tgt_tokens = batch['labels']
 
 	expanded_src_tokens = src_tokens.repeat_interleave(GENERATIONS_PER_REACTANT, dim=0)
 	expanded_src_mask = src_mask.repeat_interleave(GENERATIONS_PER_REACTANT, dim=0)
@@ -80,7 +88,7 @@ for batch in tqdm(dl, desc="Generating reward data"):
 			src_mask=expanded_src_mask,
 			sampler=nucleus_sampler,
 			top_p=0.9
-		) # Shape: [bsz * G, SeqLen_tgt]
+		)
 
 		memory = actor.encode(expanded_src_tokens, expanded_src_mask)
 		_, _, decoder_hidden_states = actor.evaluate_actions(
@@ -88,14 +96,13 @@ for batch in tqdm(dl, desc="Generating reward data"):
 			src_mask=expanded_src_mask,
 			tgt_tokens=generated_tokens,
 			pad_token_id=tokenizer.pad_token_id
-		) # Shape: [seq - 1, bsz * G, d_model]
+		)
 
 	target_smiles_list = tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
 	generated_smiles_list = tokenizer.batch_decode(generated_tokens.tolist(), skip_special_tokens=True)
 	expanded_targets_str = [t for t in target_smiles_list for _ in range(GENERATIONS_PER_REACTANT)]
 	scores = compute_batch_tanimoto_rewards(generated_smiles_list, expanded_targets_str, device=device)
 
-	# Transpose hidden states to be [bsz, seq, d_model] 
 	decoder_hidden_states = decoder_hidden_states.permute(1, 0, 2)
 
 	src_tokens_np = expanded_src_tokens.cpu().numpy()
@@ -103,14 +110,22 @@ for batch in tqdm(dl, desc="Generating reward data"):
 	scores_np = scores.cpu().numpy()
 	hidden_states_np = decoder_hidden_states.cpu().numpy()
 
-	for i in range(len(scores_np)):
-		all_data.append({
-			"reactant_tokens": src_tokens_np[i],
-			"product_tokens": product_tokens_np[i],
-			"score": scores_np[i],
-			"decoder_hidden_states": hidden_states_np[i]
-		})
+	with env.begin(write=True) as txn:
+		for i in range(len(scores_np)):
+			data_point = {
+				"reactant_tokens": src_tokens_np[i],
+				"product_tokens": product_tokens_np[i],
+				"score": scores_np[i],
+				"decoder_hidden_states": hidden_states_np[i]
+			}
+			value = pickle.dumps(data_point)
+			key = str(data_idx).encode('utf-8')
+			txn.put(key, value)
+			data_idx += 1
 
-print(f"\nSaving {len(all_data)} data points to {OUTPUT_FILE}...")
-joblib.dump(all_data, OUTPUT_FILE, compress=3) # Use compression to save space
+with env.begin(write=True) as txn:
+	txn.put(b'__len__', str(data_idx).encode('utf-8'))
+
+print(f"\nSaved {data_idx} data points to {OUTPUT_DB_PATH}")
+env.close() # Always close the environment
 print("Data generation and saving complete.")
