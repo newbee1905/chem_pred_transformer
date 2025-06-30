@@ -256,8 +256,8 @@ class PPOModule(pl.LightningModule):
 				decoder_input_for_value, memory, memory_mask=src_mask
 			)
 
-			# values = self.critic(decoder_output_for_value, memory, src_mask)
-			values = self.critic(memory, src_mask)
+			values = self.critic(decoder_output_for_value, memory, src_mask)
+			# values = self.critic(memory, src_mask)
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens.tolist(), skip_special_tokens=True)
@@ -354,8 +354,8 @@ class PPOModule(pl.LightningModule):
 			kl_div = (new_log_probs - ref_log_probs).mean()
 			kl_penalty = F.relu(kl_div)
 
-			# new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
-			new_values = self.critic(memory.detach(), src_mask)
+			new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
+			# new_values = self.critic(memory.detach(), src_mask)
 			new_log_probs = new_log_probs.to(old_log_probs.device)
 
 			# Policy Loss (Clipped Surrogate Objective)
