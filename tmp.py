@@ -37,6 +37,7 @@ from models.bart import BART
 from metrics import compute_batch_tanimoto_rewards
 from models.chemformer import Chemformer
 from models.sampler import greedy_sampler, beam_search_sampler, nucleus_sampler
+from transformers import get_cosine_schedule_with_warmup
 
 from typing import Optional, Callable, Dict, Any
 
@@ -196,6 +197,7 @@ class PPOModule(pl.LightningModule):
 		clip_epsilon: float = 0.2,
 		ent_coef: float = 0.01,
 		kl_coef: float = 0.05,
+		warm_up_percent: float = 0.05,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -204,6 +206,8 @@ class PPOModule(pl.LightningModule):
 		self.critic = critic
 		self.tokenizer = tokenizer
 		self.lr = lr
+
+		self.total_steps = None
 
 		self.ref_actor = copy.deepcopy(self.actor)
 		for param in self.ref_actor.parameters():
@@ -498,9 +502,50 @@ class PPOModule(pl.LightningModule):
 		return rewards.mean()
 
 	def configure_optimizers(self):
-		opt_actor = torch.optim.AdamW(self.actor.parameters(), lr=self.hparams.lr)
+		ff_params = []
+		emb_params = []
+		no_decay = []
+		main_params = []
+
+		for name, p in self.actor.named_parameters():
+			if not p.requires_grad:
+				continue
+			if "embed_tokens" in name:
+				emb_params.append(p)
+			elif "ff" in name:
+				ff_params.append(p)
+			elif "bias" in name or "norm" in name:
+				no_decay.append(p)
+			else:
+				main_params.append(p)
+
+		base_lr = self.hparams.lr
+		optimizer_grouped_parameters = [
+			{"params": main_params, "weight_decay": 0.01},
+			{"params": no_decay, "weight_decay": 0.0},
+			{"params": ff_params, "lr": base_lr * 0.5, "weight_decay": 0.01},
+			{"params": emb_params, "lr": base_lr * 0.1, "weight_decay": 0.0},
+		]
+
+		opt_actor = torch.optim.AdamW(optimizer_grouped_parameters, lr=base_lr, betas=(0.9, 0.999))
 		opt_critic = torch.optim.AdamW(self.critic.parameters(), lr=self.hparams.lr)
-		return opt_actor, opt_critic
+
+		if self.total_steps is None:
+			self.total_steps = self.trainer.estimated_stepping_batches
+			self.warmup_steps = int(self.hparams.warm_up_percent * self.total_steps)
+
+		actor_scheduler = get_cosine_schedule_with_warmup(
+			opt_actor,
+			num_warmup_steps=self.warmup_steps,
+			num_training_steps=self.total_steps
+		)
+
+		return (
+			[opt_actor, opt_critic],
+			[
+				{"scheduler": actor_scheduler, "interval": "step"},
+			]
+		)
 
 untrained_bart_nn_module = BART(**MODEL_CONFIG)
 
