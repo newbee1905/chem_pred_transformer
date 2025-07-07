@@ -189,7 +189,7 @@ class PPOModule(pl.LightningModule):
 		actor: BART | Chemformer,
 		critic: Critic,
 		tokenizer,
-		sampler_fn: Callable = nucleus_sampler,
+		sampler_fn: Callable = beam_search_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 5e-6,
 		ppo_epochs: int = 2,
@@ -216,6 +216,8 @@ class PPOModule(pl.LightningModule):
 		self.sampler_kwargs.setdefault("end_token_id", self.tokenizer.eos_token_id)
 		if self.sampler_fn == nucleus_sampler:
 			self.sampler_kwargs.setdefault("top_p", 0.9)
+		elif self.sampler_fn == beam_search_sampler:
+			self.sampler_kwargs.setdefault("beam_size", 5)
 
 		self.automatic_optimization = False
 
@@ -240,9 +242,15 @@ class PPOModule(pl.LightningModule):
 			# )
 			# old_log_probs = old_log_probs.detach()
 
-			pred_tokens = self.sampler_fn(
-				self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
-			)
+			if self.sampler_fn == beam_search_sampler:
+				generated_tokens, _ = self.sampler_fn(
+					self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
+				)
+				pred_tokens = generated_tokens[:, 0, :]
+			else:
+				pred_tokens = self.sampler_fn(
+					self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
+				)
 
 			self.actor.clear_cache()
 
