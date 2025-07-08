@@ -24,6 +24,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from utils import set_seed, filter_none_kwargs
+from concurrent.futures import ThreadPoolExecutor
 
 import torch._dynamo
 from torch._dynamo import disable
@@ -42,61 +43,58 @@ from transformers import get_cosine_schedule_with_warmup
 from typing import Optional, Callable, Dict, Any
 
 class LoRAInjectedLinear(nn.Module):
-    """
-    A wrapper class that injects a LoRA layer into an existing nn.Linear layer.
-    """
-    def __init__(self, original_layer: nn.Linear, rank: int, alpha: int = 8):
-        super().__init__()
-        
-        # Freeze and store the original layer
-        self.original_layer = original_layer
-        self.original_layer.requires_grad_(False)
-        
-        in_features, out_features = original_layer.in_features, original_layer.out_features
-        self.rank = rank
-        self.alpha = alpha
+	"""
+	A wrapper class that injects a LoRA layer into an existing nn.Linear layer.
+	"""
+	def __init__(self, original_layer: nn.Linear, rank: int, alpha: int = 8):
+		super().__init__()
+		
+		self.original_layer = original_layer
+		self.original_layer.requires_grad_(False)
+		
+		in_features, out_features = original_layer.in_features, original_layer.out_features
+		self.in_features = in_features
+		self.out_features = out_features
+		self.rank = rank
+		self.alpha = alpha
 
-        # Create the LoRA layers
-        self.lora_A = nn.Linear(in_features, rank, bias=False)
-        self.lora_B = nn.Linear(rank, out_features, bias=False)
-        
-        # Initialize LoRA weights
-        # A is initialized with Kaiming uniform, B is initialized to zero.
-        # This ensures that at the start of training, the LoRA modification is zero.
-        nn.init.kaiming_uniform_(self.lora_A.weight, a=5**0.5)
-        nn.init.zeros_(self.lora_B.weight)
-        
-        self.scaling = self.alpha / self.rank
+		self.lora_A = nn.Linear(in_features, rank, bias=False)
+		self.lora_B = nn.Linear(rank, out_features, bias=False)
+		
+		# Init LoRA weights
+		# A is initialized with Kaiming uniform, B is initialized to zero.
+		# This ensures that at the start of training, the LoRA modification is zero.
+		nn.init.kaiming_uniform_(self.lora_A.weight, a=5**0.5)
+		nn.init.zeros_(self.lora_B.weight)
+		
+		self.scaling = self.alpha / self.rank
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Original forward pass (with frozen weights)
-        original_output = self.original_layer(x)
-        
-        # LoRA forward pass (with trainable weights)
-        lora_output = self.lora_B(self.lora_A(x)) * self.scaling
-        
-        # Add the outputs together
-        return original_output + lora_output
+	def forward(self, x: torch.Tensor) -> torch.Tensor:
+		original_output = self.original_layer(x)
+		lora_output = self.lora_B(self.lora_A(x)) * self.scaling
+		
+		return original_output + lora_output
 
 def apply_lora_to_model(model: nn.Module, rank: int, alpha: int):
-    for name, module in model.named_children():
-        if isinstance(module, nn.Linear):
-            setattr(model, name, LoRAInjectedLinear(module, rank, alpha))
-        else:
-            apply_lora_to_model(module, rank, alpha)
+	for name, module in model.named_children():
+		if isinstance(module, nn.Linear):
+			setattr(model, name, LoRAInjectedLinear(module, rank, alpha))
+		else:
+			apply_lora_to_model(module, rank, alpha)
 
 USPTO_CSV_FILE = "USPTO_MIT.csv"
 MAX_LENGTH = 282
 BATCH_SIZE = 256
 NUM_WORKERS = 12
 NUM_EPOCHS = 10
+# CKPT_PATH = "train_checkpoints_server/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 
 VALID_SMILES_CHARS_RE = re.compile(r'[^\w\(\)\[\]=\-\#/\+\.@%0-9]')
 INVALID_BOND_SEQUENCE_RE = re.compile(r'==|##|==#|##=')
 ATOM_PATTERN_RE = re.compile(r'[A-Z][a-z]?')
 
-def intermediate_smiles_reward(
+def _intermediate_smiles_reward(
 	partial_smiles: str,
 	reactant_smiles: str
 ) -> float:
@@ -121,6 +119,17 @@ def intermediate_smiles_reward(
 
 	diff = abs(len(prod_atoms) - len(reac_atoms))
 	return max(0.0, 1.0 - diff / len(reac_atoms))
+
+def intermediate_smiles_reward(
+	partial_smiles_list: list[str],
+	reactant_smiles_list: list[str]
+) -> list[float]:
+
+	with ThreadPoolExecutor() as executor:
+		args = zip(partial_smiles_list, reactant_smiles_list)
+		scores = list(executor.map(lambda x: _intermediate_smiles_reward(*x), args))
+
+	return scores
 
 tokenizer = ChemformerTokenizerFast("bart_vocab.json")
 vocab_size = tokenizer.vocab_size
@@ -237,7 +246,7 @@ class PPOModule(pl.LightningModule):
 		sampler_fn: Callable = beam_search_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 5e-6,
-		ppo_epochs: int = 2,
+		ppo_epochs: int = 4,
 		clip_epsilon: float = 0.2,
 		ent_coef: float = 0.01,
 		kl_coef: float = 0.05,
@@ -265,7 +274,7 @@ class PPOModule(pl.LightningModule):
 		if self.sampler_fn == nucleus_sampler:
 			self.sampler_kwargs.setdefault("top_p", 0.9)
 		elif self.sampler_fn == beam_search_sampler:
-			self.sampler_kwargs.setdefault("beam_size", 5)
+			self.sampler_kwargs.setdefault("beam_size", 3)
 
 		self.automatic_optimization = False
 
@@ -292,7 +301,7 @@ class PPOModule(pl.LightningModule):
 
 			if self.sampler_fn == beam_search_sampler:
 				generated_tokens, _ = self.sampler_fn(
-					self.actor, memory, src_mask, kv_cache=True, **self.sampler_kwargs
+					self.actor, memory, src_mask, kv_cache=False, **self.sampler_kwargs
 				)
 				pred_tokens = generated_tokens[:, 0, :]
 			else:
@@ -321,21 +330,24 @@ class PPOModule(pl.LightningModule):
 
 		tanimoto = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device)
 
-		grammar_rewards = []
-		for b in range(pred_tokens.size(0)):
-			prefixes = [
-				self.tokenizer.decode(
-					pred_tokens[b, : i + 1].tolist(),
-					skip_special_tokens=True,
-				)
-				for i in range(pred_tokens.size(1))
-			]
-			scores = [
-				intermediate_smiles_reward(pref, reactant_smiles[b])
-				for pref in prefixes
-			]
-			grammar_rewards.append(sum(scores) / len(scores))
-		grammar = torch.tensor(grammar_rewards, device=self.device)
+		# grammar_rewards = []
+
+		pred_tokens_cpu = pred_tokens.tolist()
+		bsz, seq_len = len(pred_tokens_cpu), len(pred_tokens_cpu[0])
+
+		all_prefixes = [
+			self.tokenizer.decode(pred_tokens[b, : i + 1], skip_special_tokens=True)
+			for b in range(bsz)
+			for i in range(seq_len)
+		]
+
+		all_reactants = [
+			reactant_smiles[b] for b in range(bsz) for _ in range(seq_len)
+		]
+
+		all_grammar_scores = intermediate_smiles_reward(all_prefixes, all_reactants)
+		grammar_scores = torch.tensor(all_grammar_scores, device=self.device).view(bsz, seq_len)
+		grammar = grammar_scores.mean(dim=1)
 
 		rewards = tanimoto + grammar
 
@@ -345,10 +357,73 @@ class PPOModule(pl.LightningModule):
 		# Normalize advantages for training stability 
 		adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
 
+		self.actor.train()
+		self.critic.train()
+
+		actions = pred_tokens.detach()
+		for _ in range(self.hparams.ppo_epochs):
+			self.actor.clear_cache()
+
+			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
+				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
+			)
+
+			with torch.no_grad():
+				self.actor.clear_cache()
+
+				ref_log_probs, _, _ = self.ref_actor.evaluate_actions(
+					memory.detach(), src_mask, pred_tokens, self.tokenizer.pad_token_id
+				)
+
+			ref_log_probs = ref_log_probs.to(self.device)
+
+			kl_div = (new_log_probs - ref_log_probs).mean()
+			kl_penalty = torch.abs(kl_div)
+
+			new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
+			# new_values = self.critic(memory.detach(), src_mask)
+			new_log_probs = new_log_probs.to(old_log_probs.device)
+
+			# Policy Loss (Clipped Surrogate Objective)
+			log_ratio = new_log_probs - old_log_probs
+			# log_ratio_std = log_ratio.std()
+			# log_ratio_mean = log_ratio.mean()
+
+			log_ratio = torch.clamp(
+				log_ratio, 
+				min=-5,
+				max=5,
+				# min=log_ratio_mean - 3 * log_ratio_std,
+				# max=log_ratio_mean + 3 * log_ratio_std
+			)
+
+			ratio = log_ratio.exp().to(adv.device)
+			# ratio = (new_log_probs - old_log_probs).exp().to(adv.device)
+			s1 = ratio * adv
+			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
+			policy_loss = -torch.min(s1, s2).mean()
+
+			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl_penalty
+
+			# Value Function Loss
+			value_loss = F.mse_loss(new_values, returns)
+
+			opt_actor.zero_grad()
+			opt_critic.zero_grad()
+
+			actor_loss.backward()
+			value_loss.backward()
+
+			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
+			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
+
+			opt_actor.step()
+			opt_critic.step()
+
 		print(f"\n--- DEBUGGING at Epoch {self.current_epoch}, Batch Index {batch_idx} ---")
-		print(f"Rewards:	   mean={rewards.mean():.4f}, std={rewards.std():.4f}, min={rewards.min():.4f}, max={rewards.max():.4f}")
+		print(f"Rewards:	       mean={rewards.mean():.4f}, std={rewards.std():.4f}, min={rewards.min():.4f}, max={rewards.max():.4f}")
 		print(f"Values (critic): mean={values.mean():.4f}, std={values.std():.4f}, min={values.min():.4f}, max={values.max():.4f}")
-		print(f"Returns:	   mean={returns.mean():.4f}, std={returns.std():.4f}, min={returns.min():.4f}, max={returns.max():.4f}")
+		print(f"Returns:	       mean={returns.mean():.4f}, std={returns.std():.4f}, min={returns.min():.4f}, max={returns.max():.4f}")
 		
 		adv_before_norm = (returns - values).detach()
 		print(f"Adv (pre-norm):  mean={adv_before_norm.mean():.4f}, std={adv_before_norm.std():.4f}, min={adv_before_norm.min():.4f}, max={adv_before_norm.max():.4f}")
@@ -385,71 +460,6 @@ class PPOModule(pl.LightningModule):
 			if torch.isinf(temp_ratio).any():
 		 	 print("!!!!!! FOUND INF in Ratio calculation !!!!!!")
 		print(f"--- END DEBUGGING ---")
-
-
-		self.actor.train()
-		self.critic.train()
-
-		actions = pred_tokens.detach()
-		for _ in range(self.hparams.ppo_epochs):
-			self.actor.clear_cache()
-
-			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
-				memory, src_mask, pred_tokens, self.tokenizer.pad_token_id
-			)
-
-			with torch.no_grad():
-				self.actor.clear_cache()
-
-				ref_log_probs, _, _ = self.ref_actor.evaluate_actions(
-					memory.detach(), src_mask, pred_tokens, self.tokenizer.pad_token_id
-				)
-
-			ref_log_probs = ref_log_probs.to(self.device)
-
-			kl_div = (new_log_probs - ref_log_probs).mean()
-			kl_penalty = F.relu(kl_div)
-
-			new_values = self.critic(decoder_output.detach(), memory.detach(), src_mask)
-			# new_values = self.critic(memory.detach(), src_mask)
-			new_log_probs = new_log_probs.to(old_log_probs.device)
-
-			# Policy Loss (Clipped Surrogate Objective)
-			log_ratio = new_log_probs - old_log_probs
-			# log_ratio_std = log_ratio.std()
-			# log_ratio_mean = log_ratio.mean()
-
-			log_ratio = torch.clamp(
-				log_ratio, 
-				min=-5,
-				max=5,
-				# min=log_ratio_mean - 3 * log_ratio_std,
-				# max=log_ratio_mean + 3 * log_ratio_std
-			)
-
-			ratio = log_ratio.exp().to(adv.device)
-			# ratio = (new_log_probs - old_log_probs).exp().to(adv.device)
-			s1 = ratio * adv
-			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
-			policy_loss = -torch.min(s1, s2).mean()
-
-			actor_loss = policy_loss - self.hparams.ent_coef * entropy.mean() + self.hparams.kl_coef * kl_penalty
-
-			# Value Function Loss
-			value_loss = F.mse_loss(new_values, returns)
-
-			opt_actor.zero_grad()
-			opt_critic.zero_grad()
-
-
-			actor_loss.backward()
-			value_loss.backward()
-
-			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
-			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
-
-			opt_actor.step()
-			opt_critic.step()
 
 		self.log_dict({
 			"train/policy_loss": policy_loss,
@@ -604,9 +614,14 @@ print("Model loaded successfully.")
 actor = lightning_model.model
 print(actor)
 
-apply_lora_to_model(actor, rank=16, alpha=8)
-print("Actor after applying LoRA:")
-print(actor)
+# apply_lora_to_model(actor, rank=16, alpha=8)
+# print("Actor after applying LoRA:")
+# print(actor)
+
+# print("Freezing the actor's encoder...")
+# for param in actor.encoder.parameters():
+# 	param.requires_grad = False
+# print("Encoder frozen.")
 
 critic = Critic(actor.d_model)
 print(critic)
