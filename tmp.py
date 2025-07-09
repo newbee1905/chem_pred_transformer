@@ -511,7 +511,7 @@ class PPOModule(pl.LightningModule):
 		src_mask = src_mask.eq(0)
 		tgt_tokens = batch["labels"]
 
-		beam_size = 10  # Use a beam size that allows for top-5 and top-10 calculation
+		beam_size = 10 
 		max_length = self.actor.max_seq_len
 
 		with torch.no_grad():
