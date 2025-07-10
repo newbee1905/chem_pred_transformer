@@ -1,3 +1,4 @@
+import argparse
 import copy
 import os
 import hydra
@@ -85,7 +86,7 @@ def apply_lora_to_model(model: nn.Module, rank: int, alpha: int):
 USPTO_CSV_FILE = "USPTO_MIT.csv"
 MAX_LENGTH = 282
 BATCH_SIZE = 256
-NUM_WORKERS = 12
+NUM_WORKERS = 24
 NUM_EPOCHS = 10
 # CKPT_PATH = "train_checkpoints_server/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
@@ -245,12 +246,12 @@ class PPOModule(pl.LightningModule):
 		tokenizer,
 		sampler_fn: Callable = beam_search_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
-		lr: float = 5e-6,
-		ppo_epochs: int = 4,
+		lr: float = 5e-4,
+		ppo_epochs: int = 6,
 		clip_epsilon: float = 0.2,
 		ent_coef: float = 0.01,
-		kl_coef: float = 0.05,
-		warm_up_percent: float = 0.05,
+		kl_coef: float = 0.01,
+		warm_up_percent: float = 0.01,
 	):
 		super().__init__()
 		self.save_hyperparameters(ignore=["actor", "critic"])
@@ -274,7 +275,7 @@ class PPOModule(pl.LightningModule):
 		if self.sampler_fn == nucleus_sampler:
 			self.sampler_kwargs.setdefault("top_p", 0.9)
 		elif self.sampler_fn == beam_search_sampler:
-			self.sampler_kwargs.setdefault("beam_size", 3)
+			self.sampler_kwargs.setdefault("beam_size", 2)
 
 		self.automatic_optimization = False
 
@@ -398,6 +399,7 @@ class PPOModule(pl.LightningModule):
 			)
 
 			ratio = log_ratio.exp().to(adv.device)
+			print(f"Ratio (actual): mean={ratio.mean():.4f}, std={ratio.std():.4f}, min={ratio.min():.4f}, max={ratio.max():.4f}")
 			# ratio = (new_log_probs - old_log_probs).exp().to(adv.device)
 			s1 = ratio * adv
 			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
@@ -421,9 +423,9 @@ class PPOModule(pl.LightningModule):
 			opt_critic.step()
 
 		print(f"\n--- DEBUGGING at Epoch {self.current_epoch}, Batch Index {batch_idx} ---")
-		print(f"Rewards:	       mean={rewards.mean():.4f}, std={rewards.std():.4f}, min={rewards.min():.4f}, max={rewards.max():.4f}")
+		print(f"Rewards:         mean={rewards.mean():.4f}, std={rewards.std():.4f}, min={rewards.min():.4f}, max={rewards.max():.4f}")
 		print(f"Values (critic): mean={values.mean():.4f}, std={values.std():.4f}, min={values.min():.4f}, max={values.max():.4f}")
-		print(f"Returns:	       mean={returns.mean():.4f}, std={returns.std():.4f}, min={returns.min():.4f}, max={returns.max():.4f}")
+		print(f"Returns:         mean={returns.mean():.4f}, std={returns.std():.4f}, min={returns.min():.4f}, max={returns.max():.4f}")
 		
 		adv_before_norm = (returns - values).detach()
 		print(f"Adv (pre-norm):  mean={adv_before_norm.mean():.4f}, std={adv_before_norm.std():.4f}, min={adv_before_norm.min():.4f}, max={adv_before_norm.max():.4f}")
@@ -521,7 +523,7 @@ class PPOModule(pl.LightningModule):
 				sampler=beam_search_sampler,
 				beam_size=beam_size,
 				max_length=max_length,
-				kv_cache=True,
+				kv_cache=False,
 				start_token_id=self.tokenizer.bos_token_id,
 				end_token_id=self.tokenizer.eos_token_id,
 			)
@@ -601,53 +603,77 @@ class PPOModule(pl.LightningModule):
 			]
 		)
 
-untrained_bart_nn_module = BART(**MODEL_CONFIG)
+def main():
+	parser = argparse.ArgumentParser(description="PPO Training and Testing")
+	parser.add_argument("--action", type=str, choices=['fit', 'test', 'fit_test'], default='fit_test', help="Action to perform: 'fit', 'test', or 'fit_test'.")
+	parser.add_argument("--bart_ckpt_path", type=str, default=CKPT_PATH, help="Path to BART checkpoint for actor initialization.")
+	parser.add_argument("--ppo_ckpt_path", type=str, default=None, help="Path to PPO checkpoint to load for testing or resuming training.")
+	args = parser.parse_args()
 
-print("Loading trained LightningModule from checkpoint...")
-lightning_model = BARTModel.load_from_checkpoint(
-	checkpoint_path=CKPT_PATH,
-	model=untrained_bart_nn_module,
-	tokenizer=tokenizer
-)
-print("Model loaded successfully.")
+	untrained_bart_nn_module = BART(**MODEL_CONFIG)
 
-actor = lightning_model.model
-print(actor)
+	print("Loading trained LightningModule from checkpoint...")
+	lightning_model = BARTModel.load_from_checkpoint(
+		checkpoint_path=args.bart_ckpt_path,
+		model=untrained_bart_nn_module,
+		tokenizer=tokenizer
+	)
+	print("Model loaded successfully.")
 
-# apply_lora_to_model(actor, rank=16, alpha=8)
-# print("Actor after applying LoRA:")
-# print(actor)
+	actor = lightning_model.model
+	print(actor)
 
-# print("Freezing the actor's encoder...")
-# for param in actor.encoder.parameters():
-# 	param.requires_grad = False
-# print("Encoder frozen.")
+	# apply_lora_to_model(actor, rank=16, alpha=8)
+	# print("Actor after applying LoRA:")
+	# print(actor)
 
-critic = Critic(actor.d_model)
-print(critic)
+	# print("Freezing the actor's encoder...")
+	# for param in actor.encoder.parameters():
+	# 	param.requires_grad = False
+	# print("Encoder frozen.")
 
-logger = TensorBoardLogger('lightning_logs', name='ppo')
+	critic = Critic(actor.d_model)
+	print(critic)
 
-ckpt_exact = ModelCheckpoint(
-  monitor='val/exact_match_rate', mode='max', save_top_k=1,
-  dirpath="ppo_checkpoints", filename='best-exact-{epoch:02d}-{val/exact_match_rate:.4f}'
-)
-ckpt_reward = ModelCheckpoint(
-  monitor='val/mean_reward', mode='max', save_top_k=1,
-  dirpath="ppo_checkpoints", filename='best-reward-{epoch:02d}-{val/mean_reward:.4f}'
-)
+	logger = TensorBoardLogger('lightning_logs', name='ppo')
 
-trainer = pl.Trainer(
-  max_epochs=NUM_EPOCHS,
-  logger=logger,
-  callbacks=[ckpt_exact, ckpt_reward],
-  accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-  devices=1,
-)
+	ckpt_exact = ModelCheckpoint(
+		monitor='val/exact_match_rate', mode='max', save_top_k=1,
+		dirpath="ppo_checkpoints", filename='best-exact-{epoch:02d}-{val/exact_match_rate:.4f}'
+	)
+	ckpt_reward = ModelCheckpoint(
+		monitor='val/mean_reward', mode='max', save_top_k=1,
+		dirpath="ppo_checkpoints", filename='best-reward-{epoch:02d}-{val/mean_reward:.4f}'
+	)
 
-from rdkit import RDLogger
-RDLogger.DisableLog('rdApp.*')
+	trainer = pl.Trainer(
+		max_epochs=NUM_EPOCHS,
+		logger=logger,
+		callbacks=[ckpt_exact, ckpt_reward],
+		accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+		devices=1,
+	)
 
-model = PPOModule(actor, critic, tokenizer)
-trainer.fit(model, train_dl, val_dl)
-trainer.test(model, dataloaders=test_dl)
+	from rdkit import RDLogger
+	RDLogger.DisableLog('rdApp.*')
+
+	if args.action == 'test':
+		if not args.ppo_ckpt_path:
+			print("Error: For action 'test', --ppo_ckpt_path must be provided.")
+			return
+
+		model = PPOModule.load_from_checkpoint(
+			args.ppo_ckpt_path,
+			actor=actor,
+			critic=critic,
+			tokenizer=tokenizer
+		)
+		trainer.test(model, dataloaders=test_dl)
+	else:  # fit or fit_test
+		model = PPOModule(actor, critic, tokenizer)
+		trainer.fit(model, train_dl, val_dl, ckpt_path=args.ppo_ckpt_path)
+		if args.action == 'fit_test':
+			trainer.test(model, dataloaders=test_dl, ckpt_path='best')
+
+if __name__ == "__main__":
+	main()
