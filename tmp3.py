@@ -5,12 +5,12 @@ import torch
 import joblib
 from tqdm.auto import tqdm
 import numpy as np
-import lmdb  # NEW: Import lmdb
-import pickle # NEW: Import pickle
+import lmdb
+import pickle
 
 from trainer.bart import BARTModel
 from models.bart import BART
-from models.sampler import nucleus_sampler
+from models.sampler import beam_search_sampler
 from tokenisers.neochem import ChemformerTokenizerFast
 from dataset.uspto import USPTODataset
 from dataset.base import BARTDataCollator
@@ -20,8 +20,8 @@ from torch.utils.data import DataLoader
 CKPT_PATH = "train_checkpoints/best-checkpoint-finetune-uspto-sep-bart_small_v8-v8.ckpt"
 USPTO_CSV_FILE = "USPTO_MIT.csv"
 OUTPUT_DB_PATH = "reward_data.lmdb" 
-GENERATIONS_PER_REACTANT = 5
-BATCH_SIZE = 16
+GENERATIONS_PER_REACTANT = 1
+BATCH_SIZE = 256
 LMDB_MAP_SIZE = 1024**4
 
 print("Loading dataset and tokenizer...")
@@ -83,12 +83,13 @@ for batch in tqdm(dl, desc="Generating and saving reward data"):
 	expanded_src_mask = src_mask.repeat_interleave(GENERATIONS_PER_REACTANT, dim=0)
 
 	with torch.no_grad():
-		generated_tokens = actor.generate(
+		generated_tokens, _ = actor.generate(
 			src=expanded_src_tokens,
 			src_mask=expanded_src_mask,
-			sampler=nucleus_sampler,
-			top_p=0.9
+			sampler=greedy_sampler,
+			beam_size=3
 		)
+		generated_tokens = generated_tokens[:, 0, :]
 
 		memory = actor.encode(expanded_src_tokens, expanded_src_mask)
 		_, _, decoder_hidden_states = actor.evaluate_actions(
@@ -127,5 +128,5 @@ with env.begin(write=True) as txn:
 	txn.put(b'__len__', str(data_idx).encode('utf-8'))
 
 print(f"\nSaved {data_idx} data points to {OUTPUT_DB_PATH}")
-env.close() # Always close the environment
+env.close()
 print("Data generation and saving complete.")
