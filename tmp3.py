@@ -86,7 +86,7 @@ for batch in tqdm(dl, desc="Generating and saving reward data"):
 		generated_tokens, _ = actor.generate(
 			src=expanded_src_tokens,
 			src_mask=expanded_src_mask,
-			sampler=greedy_sampler,
+			sampler=beam_search_sampler,
 			beam_size=3
 		)
 		generated_tokens = generated_tokens[:, 0, :]
