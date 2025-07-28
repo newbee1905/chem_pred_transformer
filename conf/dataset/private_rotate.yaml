@@ -1,0 +1,8 @@
+type: "private"
+path: "data/private"
+_target_: dataset.private.PrivateDataset
+rotate: true
+split_mode: "predefined"
+collator:
+  _target_: dataset.pretrain.BARTDataCollator
+  max_length: 256
