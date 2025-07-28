@@ -87,6 +87,17 @@ def my_app(cfg : DictConfig) -> None:
 			train_ds = instantiate(cfg.dataset, f"{nmap_folder}/train.nmap", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			val_ds = instantiate(cfg.dataset, f"{nmap_folder}/val.nmap", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			test_ds = instantiate(cfg.dataset, f"{nmap_folder}/test.nmap", tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+		elif cfg.dataset.type == "private":
+			del cfg.dataset.type
+			path = cfg.dataset.path
+			del cfg.dataset.path
+
+			collator = instantiate(cfg.dataset.collator, tokenizer=tokenizer)
+			del cfg.dataset.collator
+
+			train_ds = instantiate(cfg.dataset, f"{path}/train.csv", tokenizer=tokenizer)
+			val_ds = instantiate(cfg.dataset, f"{path}/val.csv", tokenizer=tokenizer)
+			test_ds = instantiate(cfg.dataset, f"{path}/test.csv", tokenizer=tokenizer)
 		else:
 			with open(cfg.dataset.path, "rb") as f:
 				data_splits = pickle.load(f)
@@ -189,7 +200,7 @@ def my_app(cfg : DictConfig) -> None:
 			best_ckpt = ckpt_cb.best_model_path
 			sd = torch.load(best_ckpt, map_location="cpu")["state_dict"]
 			torch.save(sd, cfg.pth_path)
-			print(f"Best model weights saved to {cfg.pth_path} (from {best})")
+			print(f"Best model weights saved to {cfg.pth_path}")
 
 if __name__ == "__main__":
 	from rdkit import RDLogger
