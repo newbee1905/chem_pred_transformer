@@ -1,0 +1,9 @@
+_target_: models.bart.BART
+d_model: 512
+n_heads: 8
+n_layers: 6
+d_ff: 2048 # typically d_model * 4
+# norm_layer: ${py:torch.nn.RMSNorm}
+norm_layer: ${py:models.norm.RMSNorm}
+activation: "swiglu"
+theta: 5000
