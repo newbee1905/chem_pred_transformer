@@ -15,7 +15,7 @@ from models.bart import BART
 from models.sampler import greedy_sampler, beam_search_sampler, nucleus_sampler
 from tokenisers.neocart import SMILESTokenizer
 from tokenisers.chemformer import ChemformerTokenizer
-from metrics import SMILESEvaluationMetric
+from metrics import SMILESEvaluationMetric, compute_batch_tanimoto_rewards
 
 from utils import is_valid_smiles
 
@@ -23,6 +23,7 @@ import sys
 from pprint import pprint
 import time
 import math
+from models.lora import apply_lora_to_model
 
 class BARTModel(pl.LightningModule): 
 	def __init__(
@@ -35,14 +36,23 @@ class BARTModel(pl.LightningModule):
 			aux_warmup_steps: int = 10000,
 			aux_weight_max: float = 0.1,
 			warm_up_percent: float = 0.05,
-			rl_coef: float = 0.1,
+			rl_coef: float = 0.5,
 			# rl_coef: float = 0,
+			# mrt_coef: float = 0.5,
+			mrt_coef: float = 0,
+			mrt_beam_size: int = 10,
+			mrt_alpha: float = 0.05,
+			use_lora: bool = False,
 		):
 		super().__init__()
 		# self.model = torch.compile(
 		# 	model,
 		# 	fullgraph=True,
 		# )
+
+		if use_lora:
+			apply_lora_to_model(model, rank=16, alpha=8)
+
 		self.model = model
 		self.tokenizer = tokenizer
 		self.loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
@@ -64,6 +74,10 @@ class BARTModel(pl.LightningModule):
 
 		self.rl_coef = rl_coef
 		self.baseline = 0.0
+
+		self.mrt_coef = mrt_coef
+		self.mrt_beam_size = mrt_beam_size
+		self.mrt_alpha = mrt_alpha
 
 		self.warm_up_percent = warm_up_percent
 		self.total_steps = None
@@ -151,6 +165,7 @@ class BARTModel(pl.LightningModule):
 			loss = loss + self.aux_weight * aux_loss
 			# self.log("train_total_loss", loss, prog_bar=True, sync_dist=True)
 
+		generated_tokens, log_pi = None, None
 		if self.rl_coef > 0:
 			step = float(self.global_step)
 			alpha = min(1.0, step / self.warmup_steps) if self.warmup_steps is not None else 0
@@ -159,7 +174,8 @@ class BARTModel(pl.LightningModule):
 			idx = torch.randint(0, src.size(0), (1,)).item()
 
 			bsz = src.size(0)
-			k = min(16, bsz)
+			# k = min(16, bsz)
+			k = bsz
 			# src_i = src[idx:idx+1] 
 			# tgt_i = tgt[idx:idx+1]
 			# mask_i = src_padding_mask[idx:idx+1]
@@ -170,17 +186,33 @@ class BARTModel(pl.LightningModule):
 
 			with torch.no_grad():
 				generated_tokens, log_pi = self.model.generate(
-					src_i, mask_i, greedy_sampler,
+					src_i, mask_i, beam_search_sampler,
 					max_length=self.max_length,
 					start_token_id=self.tokenizer.bos_token_id,
 					end_token_id=self.tokenizer.eos_token_id,
-					kv_cache=self.kv_cache,
-					return_logpi=True,
+					beam_size=self.mrt_beam_size,
+					length_penalty_alpha=0,
 				) 
+
+				# memory = self.model.encode(src_i, mask_i)
+
+				# generated_tokens, _ = beam_search_sampler(
+				# 	self.model, memory, mask_i,
+				# 	start_token_id=self.tokenizer.bos_token_id,
+				# 	end_token_id=self.tokenizer.eos_token_id,
+				# 	beam_size=10,
+				# ) 
+
+				# generated_tokens = generated_tokens[:, 0, :]
+				# log_pi, _, _ = self.model.evaluate_actions(
+				# 	memory, mask_i, generated_tokens, self.tokenizer.pad_token_id
+				# )
+				_generated_tokens = generated_tokens[:, 0, :]
+				_log_pi = log_pi[:, 0]
 
 			# ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
 			ref_smiles_list = self.tokenizer.batch_decode(tgt_i, skip_special_tokens=True)
-			gen_smiles_list = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+			gen_smiles_list = self.tokenizer.batch_decode(_generated_tokens, skip_special_tokens=True)
 
 			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 
@@ -188,7 +220,7 @@ class BARTModel(pl.LightningModule):
 			reward = torch.tensor(metrics["avg_tanimoto"])
 
 			self.baseline = 0.9 * self.baseline + 0.1 * reward.item()
-			raw_rl = -(reward - self.baseline) * log_pi.mean()
+			raw_rl = -(reward - self.baseline) * _log_pi.mean()
 			rl_loss = raw_rl.clamp(min=-1, max=1)
 
 			reward = reward.to(src.device)
@@ -199,7 +231,55 @@ class BARTModel(pl.LightningModule):
 
 			loss = loss + self.rl_weight * rl_loss
 
-		if aux_preds or self.rl_coef > 0:
+		if self.mrt_coef > 0:
+			# Linearly warm up the MRT loss weight
+			step = float(self.global_step)
+			alpha = min(1.0, step / self.warmup_steps) if self.warmup_steps > 0 else 1.0
+			self.mrt_weight = alpha * self.mrt_coef
+
+			with torch.no_grad():
+				if generated_tokens is None:
+					# beam scores without norm is raw probabilities
+					generated_tokens, log_pi = self.model.generate(
+						src, src_padding_mask, beam_search_sampler,
+						max_length=self.max_length,
+						start_token_id=self.tokenizer.bos_token_id,
+						end_token_id=self.tokenizer.eos_token_id,
+						beam_size=self.mrt_beam_size,
+						length_penalty_alpha=0,
+					)
+
+			bsz, k, seq_len = generated_tokens.shape
+
+			top_n = 3
+			k = min(top_n, k)
+			log_pi, top_indices = torch.topk(log_pi, k=k, dim=-1)
+
+			indices_to_gather = top_indices.unsqueeze(-1).expand(bsz, k, seq_len)
+			generated_tokens = torch.gather(generated_tokens, 1, indices_to_gather)
+			
+			ref_smiles_list = self.tokenizer.batch_decode(tgt, skip_special_tokens=True)
+
+			flat_generated_tokens = rearrange(generated_tokens, 'b k s -> (b k) s')
+			flat_generated_smiles = self.tokenizer.batch_decode(flat_generated_tokens, skip_special_tokens=True)
+			repeated_ref_smiles = [smi for smi in ref_smiles_list for _ in range(k)]
+			
+			flat_rewards = compute_batch_tanimoto_rewards(flat_generated_smiles, repeated_ref_smiles)
+			rewards = torch.tensor(flat_rewards, device=self.device, dtype=torch.float32).view(bsz, k)
+
+			sharpened_log_pi = log_pi * self.mrt_alpha
+			beam_probs = F.softmax(sharpened_log_pi, dim=-1)
+			
+			expected_reward = (beam_probs.detach() * rewards).sum(dim=-1)
+			mrt_loss = -(beam_probs * rewards).sum(dim=-1).mean()
+			
+			loss = (1 - self.mrt_weight) * loss + self.mrt_weight * mrt_loss
+			
+			self.log("mrt_exp_reward", expected_reward.mean(), prog_bar=True, sync_dist=True)
+			self.log("mrt_loss", mrt_loss, prog_bar=True, sync_dist=True)
+			self.log("mrt_weight", self.mrt_weight, prog_bar=False, sync_dist=True)
+
+		if aux_preds or self.rl_coef or self.mrt_coef > 0:
 			self.log("total_loss", loss, prog_bar=True, sync_dist=True)
 
 		return loss
@@ -351,9 +431,9 @@ class BARTModel(pl.LightningModule):
 			top_beam_tokens = generated_tokens[:, 0, :].cpu()
 			gen_smiles_list = self.tokenizer.batch_decode(top_beam_tokens, skip_special_tokens=True)
 
-			# pprint(gen_smiles_list, stream=sys.stderr)
-			# pprint(ref_smiles_list, stream=sys.stderr)
-			# print("----------------------------------------", file=sys.stderr)
+			pprint(gen_smiles_list, stream=sys.stderr)
+			pprint(ref_smiles_list, stream=sys.stderr)
+			print("----------------------------------------", file=sys.stderr)
 
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
@@ -413,29 +493,26 @@ class BARTModel(pl.LightningModule):
 					main_params.append(p)
 
 			optim = AdamW([
-				{"params": main_params, "lr": 3e-4, "weight_decay": 0.01},
-				{"params": no_decay, "lr": 3e-4, "weight_decay": 0.0},
+				{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
+				{"params": no_decay, "lr": 5e-4, "weight_decay": 0.0},
 				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
 			], betas=(0.9, 0.999))
 
 			if self.total_steps is None:
 				self.total_steps = self.trainer.estimated_stepping_batches
 				self.warmup_steps = self.warm_up_percent * self.total_steps
+
 			# sched = lr_scheduler.OneCycleLR(
 			# 	optim,
 			# 	max_lr=[1e-3, 1e-3, 5e-3],
-			# 	total_steps=total_steps,
+			# 	total_steps=self.total_steps,
 			# 	pct_start=0.01,
 			# 	anneal_strategy="cos",
 			# 	div_factor=1e2,
 			# 	final_div_factor=1e3,
 			# 	cycle_momentum=False,
 			# )
-			# sched = get_linear_schedule_with_warmup(
-			# 	optim,
-			# 	num_warmup_steps=int(total_steps * 0.01),
-			# 	num_training_steps=total_steps
-			# )
+
 			sched = get_cosine_schedule_with_warmup(
 				optim,
 				num_warmup_steps=int(self.total_steps * self.warm_up_percent),
