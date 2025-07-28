@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from einops import rearrange, repeat
 
-from typing import Tuple
+from typing import Tuple, Optional
 
 class FeedForward(nn.Module):
 	"""Feedforward block with configurable activation.
@@ -62,3 +62,20 @@ class FeedForward(nn.Module):
 		x = self.fc_out(self.dropout(x_proj))
 
 		return x
+
+class AttentionPooler(nn.Module):
+	def __init__(self, d_model: int):
+		super().__init__()
+		self.attention_projector = nn.Linear(d_model, 1)
+
+	def forward(self, hidden_states: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+		attention_scores = self.attention_projector(hidden_states)
+
+		if mask is not None:
+			mask_transposed = mask.transpose(0, 1).unsqueeze(-1)
+			attention_scores = attention_scores.masked_fill(mask_transposed, float('-inf'))
+
+		attention_weights = F.softmax(attention_scores, dim=0)
+
+		pooled_output = (hidden_states * attention_weights).sum(dim=0)
+		return pooled_output
