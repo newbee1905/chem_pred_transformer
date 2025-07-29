@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import lightning.pytorch as pl
 
 LOG_RATIO_CLAMP_RANGE = (-5.0, 5.0)
-GRAD_CLIP_NORM = 0.5
+GRAD_CLIP_NORM = 1.0
 
 class PPOModule(pl.LightningModule):
 	def __init__(
@@ -44,6 +44,7 @@ class PPOModule(pl.LightningModule):
 
 		self.actor = actor
 		self.critic = critic
+		print(is_per_step)
 		self.critic.is_per_step = is_per_step
 		self.tokenizer = tokenizer
 		self.sampler_fn = sampler_fn
@@ -160,7 +161,7 @@ class PPOModule(pl.LightningModule):
 		sequence_lengths = action_mask.sum(dim=1)
 
 		step_rewards[torch.arange(bsz), sequence_lengths - 1] += tanimoto_rewards
-		
+
 		return step_rewards
 
 	def _compute_gae(
@@ -256,8 +257,8 @@ class PPOModule(pl.LightningModule):
 
 			# Entropy Bonus & KL Penalty
 			entropy_bonus = self.hparams.ent_coef * entropy.mean()
-			# kl_div = F.kl_div(ref_log_probs, new_log_probs, log_target=True, reduction='batchmean')
-			kl_div = F.kl_div(new_log_probs, ref_log_probs, log_target=True, reduction='batchmean')
+			kl_div = F.kl_div(ref_log_probs, new_log_probs, log_target=True, reduction='batchmean')
+			# kl_div = F.kl_div(new_log_probs, ref_log_probs, log_target=True, reduction='batchmean')
 			kl_penalty = self.hparams.kl_coef * kl_div
 
 			actor_loss = policy_loss - entropy_bonus + kl_penalty
