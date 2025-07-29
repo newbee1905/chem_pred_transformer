@@ -31,8 +31,8 @@ class PPOModule(pl.LightningModule):
 		lr: float = 5e-5,
 		ppo_epochs: int = 5,
 		clip_epsilon: float = 0.2,
-		ent_coef: float = 0.02,
-		kl_coef: float = 0.2,
+		ent_coef: float = 0.05,
+		kl_coef: float = 0.1,
 		warm_up_percent: float = 0.1,
 		is_per_step: bool = False,
 	):
@@ -236,7 +236,6 @@ class PPOModule(pl.LightningModule):
 			log_ratio = torch.clamp(new_log_probs - old_log_probs.detach(), *LOG_RATIO_CLAMP_RANGE)
 			ratio = log_ratio.exp().to(adv.device)
 
-			print(f"Ratio (actual): mean={ratio.mean():.4f}, std={ratio.std():.4f}, min={ratio.min():.4f}, max={ratio.max():.4f}")
 			s1 = ratio * adv
 			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
 
@@ -285,7 +284,7 @@ class PPOModule(pl.LightningModule):
 			"train/value_loss": value_loss,
 			"train/mean_reward": rewards.mean(),
 			"train/entropy": entropy.mean().item(),
-			"train/kl_div": kl_div.item(),
+			"train/kl_penalty": kl_penalty.item(),
 			"train/ratio_mean": ratio.mean().item()
 		}, prog_bar=True, on_step=True, on_epoch=False)
 
@@ -322,7 +321,14 @@ class PPOModule(pl.LightningModule):
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		target_smiles = self.tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
+
+		for i, pred_smile in enumerate(pred_smiles):
+			pred_mol = Chem.MolFromSmiles(pred_smile)
+			if pred_mol:
+				pred_smiles[i] = Chem.MolToSmiles(pred_mol, canonical=True)
 		
+		self.smiles_metric.update(pred_smiles, ref_smiles_list)
+
 		rewards = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device)
 
 		batch_size = len(target_smiles)
@@ -335,6 +341,19 @@ class PPOModule(pl.LightningModule):
 		}, prog_bar=True, on_epoch=True, sync_dist=True)
 
 		return rewards.mean()
+
+	def on_validation_epoch_end(self):
+		scores = self.smiles_metric.compute()
+
+		self.log_dict({
+			"v_valid": scores["valid_smiles_ratio"],
+			"v_tanimoto": scores["avg_tanimoto"],
+			"v_unique": scores["unique_ratio"],
+			"v_dup_ratio": scores["duplicate_ratio"],
+			"v_dup_count": scores["duplicate_count"],
+		}, prog_bar=True, sync_dist=True)
+
+		self.smiles_metric.reset()
 
 	def test_step(self, batch: dict, batch_idx: int):
 		self.actor.eval()
