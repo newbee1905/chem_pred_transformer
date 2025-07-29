@@ -81,8 +81,6 @@ class Critic(nn.Module):
 			kv_cache=False,
 		)
 
-		attn_output = attn_output.transpose(0, 1)
-
 		if not self.is_per_step:
 			pooled_memory = self.pooler(attn_output)
 			value = self.value_head(pooled_memory).squeeze(-1)
