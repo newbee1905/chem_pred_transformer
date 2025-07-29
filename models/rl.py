@@ -40,7 +40,7 @@ def _intermediate_smiles_reward(
 	diff = abs(len(prod_atoms) - len(reac_atoms))
 	return max(0.0, 1.0 - diff / len(reac_atoms))
 
-def intermediate_smiles_reward(
+def compute_intermediate_rewards(
 	partial_smiles_list: list[str],
 	reactant_smiles_list: list[str]
 ) -> list[float]:

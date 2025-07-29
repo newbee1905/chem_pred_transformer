@@ -112,7 +112,7 @@ class PPOModule(pl.LightningModule):
 
 		return pred_tokens, old_log_probs, values, memory
 	
-	def _compute_rewards(self, pred_tokens: Tensor, src_tokens: Tensor, tgt_tokens: Tensor) -> Tensor:
+	def _compute_rewards(self, pred_tokens: torch.Tensor, src_tokens: torch.Tensor, tgt_tokens: torch.Tensor) -> torch.Tensor:
 		"""Compute rewards based on Tanimoto similarity and SMILES grammar."""
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens, skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens, skip_special_tokens=True)
@@ -133,7 +133,7 @@ class PPOModule(pl.LightningModule):
 		
 		return tanimoto_rewards + grammar_rewards
 
-	def _compute_per_step_rewards(self, pred_tokens: Tensor, src_tokens: Tensor, tgt_tokens: Tensor) -> Tensor:
+	def _compute_per_step_rewards(self, pred_tokens: torch.Tensor, src_tokens: torch.Tensor, tgt_tokens: torch.Tensor) -> torch.Tensor:
 		"""Compute rewards based on Tanimoto similarity and SMILES grammar."""
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens, skip_special_tokens=True)
 		reactant_smiles = self.tokenizer.batch_decode(src_tokens, skip_special_tokens=True)
