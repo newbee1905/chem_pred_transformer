@@ -451,6 +451,16 @@ class BARTModel(pl.LightningModule):
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
 			self.log("t_smi_top1", smiles_accuracy, prog_bar=True, sync_dist=True)
+
+			for top_n in range(2, 4):
+				top_n_correct = 0
+				for i, ref in enumerate(ref_smiles_list):
+					top_n_beams = generated_tokens[i, :top_n, :].cpu()
+					top_n_smiles = self.tokenizer.batch_decode(top_n_beams, skip_special_tokens=True)
+					if ref in top_n_smiles:
+						top_n_correct += 1
+				top_n_accuracy = top_n_correct / len(ref_smiles_list) if ref_smiles_list else 0.0
+				self.log(f"t_smi_top{top_n}", top_n_accuracy, prog_bar=True, sync_dist=True)
 			
 			for top_n in range(5, self.beam_size + 1, 5):
 				top_n_correct = 0
