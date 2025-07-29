@@ -30,9 +30,9 @@ class PPOModule(pl.LightningModule):
 		sampler_fn: Callable = beam_search_sampler,
 		sampler_kwargs: Optional[Dict[str, Any]] = None,
 		lr: float = 5e-5,
-		ppo_epochs: int = 5,
+		ppo_epochs: int = 3,
 		clip_epsilon: float = 0.2,
-		ent_coef: float = 0.05,
+		ent_coef: float = 0.02,
 		kl_coef: float = 0.1,
 		warm_up_percent: float = 0.1,
 		gamma: float = 0.99,
@@ -80,7 +80,7 @@ class PPOModule(pl.LightningModule):
 		if self.sampler_fn == nucleus_sampler:
 			kwargs.setdefault("top_p", 0.9)
 		elif self.sampler_fn == beam_search_sampler:
-			kwargs.setdefault("beam_size", 10)
+			kwargs.setdefault("beam_size", 5)
 
 		return kwargs
 
@@ -191,6 +191,11 @@ class PPOModule(pl.LightningModule):
 		returns = advantages + values
 		return advantages, returns
 
+	def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
+		"""Sync the reference actor's weights with the main actor."""
+		self.ref_actor.load_state_dict(self.actor.state_dict())
+		self.ref_actor.eval()
+
 	def training_step(self, batch: dict, batch_idx: int):
 		opt_actor, opt_critic = self.optimizers()
 
@@ -224,7 +229,7 @@ class PPOModule(pl.LightningModule):
 		self.critic.train()
 
 		actions = pred_tokens.detach()
-		for _ in range(self.hparams.ppo_epochs):
+		for i in range(self.hparams.ppo_epochs):
 			self.actor.clear_cache()
 
 			new_log_probs, entropy, decoder_output = self.actor.evaluate_actions(
@@ -242,7 +247,7 @@ class PPOModule(pl.LightningModule):
 			new_log_probs = new_log_probs.to(old_log_probs.device)
 
 			# Policy Loss (Clipped Surrogate Objective)
-			log_ratio = torch.clamp(new_log_probs - old_log_probs.detach(), *LOG_RATIO_CLAMP_RANGE)
+			log_ratio = torch.clamp(new_log_probs - old_log_probs, *LOG_RATIO_CLAMP_RANGE)
 			ratio = log_ratio.exp().to(adv.device)
 
 			if not self.hparams.is_per_step:
@@ -257,8 +262,7 @@ class PPOModule(pl.LightningModule):
 
 			# Entropy Bonus & KL Penalty
 			entropy_bonus = self.hparams.ent_coef * entropy.mean()
-			kl_div = F.kl_div(ref_log_probs, new_log_probs, log_target=True, reduction='batchmean')
-			# kl_div = F.kl_div(new_log_probs, ref_log_probs, log_target=True, reduction='batchmean')
+			kl_div = (new_log_probs - ref_log_probs).mean()
 			kl_penalty = self.hparams.kl_coef * kl_div
 
 			actor_loss = policy_loss - entropy_bonus + kl_penalty
@@ -277,27 +281,30 @@ class PPOModule(pl.LightningModule):
 				value_loss = F.mse_loss(values_flat, returns_flat)
 
 			# --- Optimization Step ---
-			# opt_actor.zero_grad()
-			# self.manual_backward(actor_loss)
-			# torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
-			# opt_actor.step()
+			opt_actor.zero_grad()
+			self.manual_backward(actor_loss)
+			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
+			opt_actor.step()
 
+			opt_critic.zero_grad()
+			self.manual_backward(value_loss)
+			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), GRAD_CLIP_NORM)
+			opt_critic.step()
+
+			# opt_actor.zero_grad()
 			# opt_critic.zero_grad()
-			# self.manual_backward(value_loss)
+
+			# actor_loss.backward()
+			# value_loss.backward()
+
+			# torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
 			# torch.nn.utils.clip_grad_norm_(self.critic.parameters(), GRAD_CLIP_NORM)
+
+			# opt_actor.step()
 			# opt_critic.step()
 
-			opt_actor.zero_grad()
-			opt_critic.zero_grad()
-
-			actor_loss.backward()
-			value_loss.backward()
-
-			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
-			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), GRAD_CLIP_NORM)
-
-			opt_actor.step()
-			opt_critic.step()
+		actor_scheduler = self.lr_schedulers()
+		actor_scheduler.step()
 
 		print(f"\n--- DEBUGGING at Epoch {self.current_epoch}, Batch Index {batch_idx} ---")
 		print(f"Rewards:         mean={rewards.mean():.4f}, std={rewards.std():.4f}, min={rewards.min():.4f}, max={rewards.max():.4f}")

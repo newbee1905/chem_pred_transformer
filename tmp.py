@@ -180,7 +180,8 @@ def main():
 	)
 	ckpt_reward = ModelCheckpoint(
 		monitor='v_tanimoto', mode='max', save_top_k=1,
-		dirpath="ppo_checkpoints", filename='best-reward-{epoch:02d}-{v_tanimoto:.4f}'
+		dirpath="ppo_checkpoints", filename='best-reward-{epoch:02d}-{v_tanimoto:.4f}',
+		save_last=True,
 	)
 
 	trainer = pl.Trainer(
