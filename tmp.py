@@ -213,7 +213,7 @@ def main():
 			)
 		else:
 			print("Creating a new PPOModule for training from scratch (using BART weights).")
-			model = PPOModule(actor, critic, tokenizer, args.is_per_step)
+			model = PPOModule(actor, critic, tokenizer, is_per_step=args.is_per_step)
 
 		trainer.fit(model, train_dl, val_dl, ckpt_path=args.ppo_ckpt_path)
 		if args.action == 'fit_test':

@@ -67,8 +67,12 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 	def compute_once(self, preds: list, targets: list) -> float:
 		tanimoto_sum = 0.0
 		valid_count = 0
+		exact_match_count = 0
 
 		for pred, target in zip(preds, targets):
+			if pred == target:
+				exact_match_count += 1
+
 			mol_pred = Chem.MolFromSmiles(pred)
 			mol_target = Chem.MolFromSmiles(target)
 
@@ -84,10 +88,13 @@ class SMILESEvaluationMetric(torchmetrics.Metric):
 		# Ensure division by zero is handled, return 0 if no valid pairs
 		avg_tanimoto_val = tanimoto_sum / total_count if total_count > 0 else 0.0
 		valid_smiles_ratio_val = valid_count / total_count if total_count > 0 else 0.0
+		exact_match_ratio_val = exact_match_count / total_count if total_count > 0 else 0.0
 
 		return {
 			"avg_tanimoto": avg_tanimoto_val,
 			"valid_smiles_ratio": valid_smiles_ratio_val,
+			"exact_match_ratio": exact_match_ratio_val,
+			"total_count": total_count,
 		}
 
 	@disable

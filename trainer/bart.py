@@ -6,6 +6,7 @@ from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_wi
 from torch.optim import lr_scheduler
 
 import lightning.pytorch as pl
+from rdkit import Chem
 
 from einops import rearrange
 
@@ -217,7 +218,14 @@ class BARTModel(pl.LightningModule):
 			self.smiles_metric.update(gen_smiles_list, ref_smiles_list)
 
 			metrics = self.smiles_metric.compute_once(gen_smiles_list, ref_smiles_list)
-			reward = torch.tensor(metrics["avg_tanimoto"])
+			tanimoto, valid, exact, total = metrics["avg_tanimoto"], metrics["valid_smiles_ratio"], metrics["exact_match_ratio"], metrics["total_count"]
+
+			valid_bonus = (valid * total * 0.5 + (1 - valid) * total * -1) / total
+
+			reward = tanimoto
+			# reward = tanimoto + 0.3 * exact + valid_bonus
+
+			reward = torch.tensor(reward)
 
 			self.baseline = 0.9 * self.baseline + 0.1 * reward.item()
 			raw_rl = -(reward - self.baseline) * _log_pi.mean()
@@ -434,6 +442,11 @@ class BARTModel(pl.LightningModule):
 			pprint(gen_smiles_list, stream=sys.stderr)
 			pprint(ref_smiles_list, stream=sys.stderr)
 			print("----------------------------------------", file=sys.stderr)
+
+			for i, gen_smile in enumerate(gen_smiles_list):
+				gen_mol = Chem.MolFromSmiles(gen_smile)
+				if gen_mol:
+					gen_smiles_list[i] = Chem.MolToSmiles(gen_mol, canonical=True)
 
 			smiles_correct = sum(1 for gen, ref in zip(gen_smiles_list, ref_smiles_list) if gen == ref)
 			smiles_accuracy = smiles_correct / len(ref_smiles_list) if ref_smiles_list else 0.0

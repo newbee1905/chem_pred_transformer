@@ -244,7 +244,8 @@ class PPOModule(pl.LightningModule):
 
 			# Entropy Bonus & KL Penalty
 			entropy_bonus = self.hparams.ent_coef * entropy.mean()
-			kl_div = F.kl_div(ref_log_probs, new_log_probs, log_target=True, reduction='batchmean')
+			# kl_div = F.kl_div(ref_log_probs, new_log_probs, log_target=True, reduction='batchmean')
+			kl_div = F.kl_div(new_log_probs, ref_log_probs, log_target=True, reduction='batchmean')
 			kl_penalty = self.hparams.kl_coef * kl_div
 
 			actor_loss = policy_loss - entropy_bonus + kl_penalty
@@ -295,15 +296,29 @@ class PPOModule(pl.LightningModule):
 		src_mask = src_mask.eq(0)
 		tgt_tokens = batch["labels"]
 
+		beam_size = 10 
+		max_length = self.actor.max_seq_len
+
 		with torch.no_grad():
-			pred_tokens = self.actor.generate(
+			# pred_tokens = self.actor.generate(
+			# 	src_tokens,
+			# 	src_mask,
+			# 	sampler=greedy_sampler,
+			# 	kv_cache=True,
+			# 	start_token_id=self.tokenizer.bos_token_id,
+			# 	end_token_id=self.tokenizer.eos_token_id,
+			# )
+			generated_tokens, beam_scores = self.actor.generate(
 				src_tokens,
 				src_mask,
-				sampler=greedy_sampler,
-				kv_cache=True,
+				sampler=beam_search_sampler,
+				beam_size=beam_size,
+				max_length=max_length,
+				kv_cache=False,
 				start_token_id=self.tokenizer.bos_token_id,
 				end_token_id=self.tokenizer.eos_token_id,
 			)
+			pred_tokens = generated_tokens[:, 0, :]
 
 		pred_smiles = self.tokenizer.batch_decode(pred_tokens.tolist(), skip_special_tokens=True)
 		target_smiles = self.tokenizer.batch_decode(tgt_tokens.tolist(), skip_special_tokens=True)
