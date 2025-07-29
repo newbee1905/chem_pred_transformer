@@ -26,6 +26,8 @@ import time
 import math
 from models.lora import apply_lora_to_model
 
+from lion_pytorch import Lion
+
 class BARTModel(pl.LightningModule): 
 	def __init__(
 			self, model: BART, tokenizer: SMILESTokenizer | ChemformerTokenizer,
@@ -515,7 +517,13 @@ class BARTModel(pl.LightningModule):
 				else:
 					main_params.append(p)
 
-			optim = AdamW([
+			# optim = AdamW([
+			# 	{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
+			# 	{"params": no_decay, "lr": 5e-4, "weight_decay": 0.0},
+			# 	{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},
+			# ], betas=(0.9, 0.999))
+
+			optim = Lion([
 				{"params": main_params, "lr": 5e-4, "weight_decay": 0.01},
 				{"params": no_decay, "lr": 5e-4, "weight_decay": 0.0},
 				{"params": aux_params, "lr": 1e-3, "weight_decay": 0.01},

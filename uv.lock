@@ -228,6 +228,7 @@ dependencies = [
     { name = "hydra-core" },
     { name = "joblib" },
     { name = "lightning" },
+    { name = "lion-pytorch" },
     { name = "lmdb" },
     { name = "matplotlib" },
     { name = "muon" },
@@ -258,6 +259,7 @@ requires-dist = [
     { name = "hydra-core", specifier = ">=1.3.2" },
     { name = "joblib", specifier = ">=1.4.2" },
     { name = "lightning", specifier = ">=2.5.0.post0" },
+    { name = "lion-pytorch", specifier = ">=0.2.3" },
     { name = "lmdb", specifier = ">=1.6.2" },
     { name = "matplotlib", specifier = ">=3.10.1" },
     { name = "muon", git = "https://github.com/KellerJordan/Muon" },
@@ -847,6 +849,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f3/47/d2c2d874e4f5ae14fa1f9f0970a23ba94e3acf555cf11aead9c2bb30d938/lightning_utilities-0.14.0.tar.gz", hash = "sha256:9ab2424c1d44d90c9c74d6d9fe64f05e5613b8c29f94f6d407b9054cc7aee95e", size = 30205, upload-time = "2025-03-07T15:08:34.252Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/44/ef/b48a8bba9d0ac84141049c71ad32adcfed030d10ac2963c7c3c8c0e66091/lightning_utilities-0.14.0-py3-none-any.whl", hash = "sha256:29cd0e0d1aff903667c0111eee6d96e804261ad6d4a009be7f7da71520927314", size = 28897, upload-time = "2025-03-07T15:08:33.288Z" },
+]
+
+[[package]]
+name = "lion-pytorch"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/30/8b/b7afad06d3ace3eecf8d7b63f9f3bbab450039320fa63c7febaa5fe73765/lion_pytorch-0.2.3.tar.gz", hash = "sha256:42ba117ce857e9dd6c67c727e22e575671fd72e441900af137b05e7ee5c8fd88", size = 6990, upload-time = "2024-11-27T15:28:58.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/3a/17394e7c09a6796887d12435a7711f6bf6321efacd3e635fc69fcf6dfc70/lion_pytorch-0.2.3-py3-none-any.whl", hash = "sha256:a1f0cb6ddb46c1f5e130b985d2759c33c178195ef88b216621cb4177c6284f81", size = 6565, upload-time = "2024-11-27T15:28:57.859Z" },
 ]
 
 [[package]]
