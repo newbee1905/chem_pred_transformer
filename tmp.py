@@ -28,7 +28,8 @@ from models.bart import BART
 from models.chemformer import Chemformer
 
 from models.lora import apply_lora_to_model
-from models.rl import Critic, PPOModule
+from models.rl import Critic
+from trainers.ppo import PPOModule
 
 USPTO_CSV_FILE = "USPTO_MIT.csv"
 PRIVATE_DATA_PATH = "data/private"
