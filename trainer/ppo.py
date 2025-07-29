@@ -35,6 +35,8 @@ class PPOModule(pl.LightningModule):
 		ent_coef: float = 0.05,
 		kl_coef: float = 0.1,
 		warm_up_percent: float = 0.1,
+		gamma: float = 0.99,
+		gae_lambda: float = 0.95,
 		is_per_step: bool = False,
 	):
 		super().__init__()
@@ -165,17 +167,21 @@ class PPOModule(pl.LightningModule):
 		self, rewards: torch.Tensor, values: torch.Tensor, action_mask: torch.Tensor,
 	) -> Tuple[torch.Tensor, torch.Tensor]:
 		"""Compute Generalized Advantage Estimation."""
-		advantages = torch.zeros_like(rewards)
+		num_steps = values.size(1)
+		advantages = torch.zeros_like(values)
 		last_gae_lam = 0
 
-		# Append a zero value for the terminal state
-		values_extended = torch.cat([values, torch.zeros_like(values[:, :1])], dim=1)
+		rewards_trimmed = rewards[:, :num_steps]
+		mask_trimmed = action_mask[:, :num_steps]
 
-		for t in reversed(range(rewards.size(1))):
+		# Append a zero value for the terminal state
+		values_extended = torch.cat([values[:, 1:], torch.zeros_like(values[:, :1])], dim=1)
+
+		for t in reversed(range(num_steps)):
 			mask = action_mask[:, t].float()
 
 			# TD Error: delta = r_t + gamma * V(s_{t+1}) - V(s_t)
-			delta = rewards[:, t] + self.hparams.gamma * values_extended[:, t + 1] * mask - values_extended[:, t]
+			delta = rewards[:, t] + self.hparams.gamma * values_extended[:, t] * mask - values_extended[:, t]
 
 			# GAE: A_t = delta_t + gamma * lambda * A_{t+1}
 			last_gae_lam = delta + self.hparams.gamma * self.hparams.gae_lambda * last_gae_lam * mask
@@ -209,8 +215,9 @@ class PPOModule(pl.LightningModule):
 			per_step_rewards = self._compute_per_step_rewards(pred_tokens, src_tokens, tgt_tokens)
 			advs, returns = self._compute_gae(per_step_rewards, values, action_mask)
 
-			adv = advs[action_mask]
-			adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+			# adv = advs[action_mask]
+			adv = advs[action_mask[:, :advs.shape[1]]]
+			adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
 
 		self.actor.train()
 		self.critic.train()
@@ -237,8 +244,13 @@ class PPOModule(pl.LightningModule):
 			log_ratio = torch.clamp(new_log_probs - old_log_probs.detach(), *LOG_RATIO_CLAMP_RANGE)
 			ratio = log_ratio.exp().to(adv.device)
 
-			s1 = ratio * adv
-			s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
+			if not self.hparams.is_per_step:
+				s1 = ratio * adv
+				s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
+			else:
+				active_mask = action_mask[:, :ratio.shape[1]]
+				s1 = ratio[active_mask] * adv
+				s2 = torch.clamp(ratio, 1.0 - self.hparams.clip_epsilon, 1.0 + self.hparams.clip_epsilon) * adv
 
 			policy_loss = -torch.min(s1, s2).mean()
 

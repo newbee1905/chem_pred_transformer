@@ -124,7 +124,7 @@ def main():
 	parser.add_argument("--bart_ckpt_path", type=str, default=CKPT_PATH, help="Path to BART checkpoint for actor initialization.")
 	parser.add_argument("--ppo_ckpt_path", type=str, default=None, help="Path to PPO checkpoint to load for testing or resuming training.")
 	parser.add_argument("--output_pth_path", type=str, default="ppo_model_weights.pth", help="Path to save the final .pth weights file.")
-	parser.add_argument("--is_per_step", type=bool, default=False, help="Switch to use GAE.")
+	parser.add_argument("--is_per_step", action="store_true", help="Switch to use GAE.")
 	args = parser.parse_args()
 
 	if args.action == 'save_pth':
