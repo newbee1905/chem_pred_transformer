@@ -277,14 +277,26 @@ class PPOModule(pl.LightningModule):
 				value_loss = F.mse_loss(values_flat, returns_flat)
 
 			# --- Optimization Step ---
-			opt_actor.zero_grad()
-			self.manual_backward(actor_loss)
-			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
-			opt_actor.step()
+			# opt_actor.zero_grad()
+			# self.manual_backward(actor_loss)
+			# torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
+			# opt_actor.step()
 
+			# opt_critic.zero_grad()
+			# self.manual_backward(value_loss)
+			# torch.nn.utils.clip_grad_norm_(self.critic.parameters(), GRAD_CLIP_NORM)
+			# opt_critic.step()
+
+			opt_actor.zero_grad()
 			opt_critic.zero_grad()
-			self.manual_backward(value_loss)
+
+			actor_loss.backward()
+			value_loss.backward()
+
+			torch.nn.utils.clip_grad_norm_(self.actor.parameters(), GRAD_CLIP_NORM)
 			torch.nn.utils.clip_grad_norm_(self.critic.parameters(), GRAD_CLIP_NORM)
+
+			opt_actor.step()
 			opt_critic.step()
 
 		print(f"\n--- DEBUGGING at Epoch {self.current_epoch}, Batch Index {batch_idx} ---")
