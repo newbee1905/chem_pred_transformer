@@ -5,6 +5,7 @@ from typing import Optional, Callable, Dict, Any, Tuple
 
 from models.bart import BART
 from models.chemformer import Chemformer
+from rdkit import Chem
 
 from metrics import SMILESEvaluationMetric, compute_batch_tanimoto_rewards
 from models.sampler import greedy_sampler, beam_search_sampler, nucleus_sampler
@@ -327,7 +328,7 @@ class PPOModule(pl.LightningModule):
 			if pred_mol:
 				pred_smiles[i] = Chem.MolToSmiles(pred_mol, canonical=True)
 		
-		self.smiles_metric.update(pred_smiles, ref_smiles_list)
+		self.smiles_metric.update(pred_smiles, target_smiles)
 
 		rewards = compute_batch_tanimoto_rewards(pred_smiles, target_smiles, device=self.device)
 

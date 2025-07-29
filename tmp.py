@@ -178,6 +178,10 @@ def main():
 		monitor='val/mean_reward', mode='max', save_top_k=1,
 		dirpath="ppo_checkpoints", filename='best-reward-{epoch:02d}-{val/mean_reward:.4f}'
 	)
+	ckpt_reward = ModelCheckpoint(
+		monitor='v_tanimoto', mode='max', save_top_k=1,
+		dirpath="ppo_checkpoints", filename='best-reward-{epoch:02d}-{v_tanimoto:.4f}'
+	)
 
 	trainer = pl.Trainer(
 		max_epochs=NUM_EPOCHS,
