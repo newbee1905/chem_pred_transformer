@@ -1,0 +1,10 @@
+type: "private"
+path: "data/private"
+_target_: dataset.private.PrivateDataset
+rotate: false
+split_mode: "kfold"
+n_splits: 8
+fold_idx: 0
+collator:
+  _target_: dataset.pretrain.BARTDataCollator
+  max_length: 256

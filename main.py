@@ -8,11 +8,13 @@ from tokenisers.chemformer import ChemformerTokenizer
 from tokenisers.neochem import ChemformerTokenizerFast
 
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, ConcatDataset, Subset
 from dataset.zinc import load_smiles_by_set
 
 import importlib
 import pickle
+import numpy as np
+from sklearn.model_selection import KFold
 import lightning.pytorch as pl
 from utils import set_seed, filter_none_kwargs
 
@@ -109,6 +111,46 @@ def my_app(cfg : DictConfig) -> None:
 			val_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "valid"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			# test_ds = instantiate(cfg.dataset, data_splits[data_splits["set"] == "test"], tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
 			test_ds = instantiate(cfg.dataset, data_splits, tokenizer=tokenizer, tokenizer_type=cfg.tokenizer.type)
+
+		max_length = collator.max_length
+
+		test_dl = DataLoader(
+			test_ds,
+			batch_size=cfg.batch_size,
+			shuffle=False,
+			num_workers=cfg.num_workers,
+			collate_fn=collator,
+		)
+	elif cfg.dataset.get("split_mode") == "kfold":
+		del cfg.dataset.split_mode
+		if cfg.dataset.type == "private":
+			n_splits = cfg.dataset.n_splits
+			del cfg.dataset.n_splits
+			fold_idx = cfg.dataset.fold_idx
+			del cfg.dataset.fold_idx
+
+			del cfg.dataset.type
+			path = cfg.dataset.path
+			del cfg.dataset.path
+
+			collator = instantiate(cfg.dataset.collator, tokenizer=tokenizer)
+			del cfg.dataset.collator
+
+			ds_train = instantiate(cfg.dataset, f"{path}/train.csv", tokenizer=tokenizer)
+			ds_val = instantiate(cfg.dataset, f"{path}/val.csv", tokenizer=tokenizer)
+			ds_test = instantiate(cfg.dataset, f"{path}/test.csv", tokenizer=tokenizer)
+			ds = ConcatDataset([ds_train, ds_val, ds_test])
+
+			kf = KFold(n_splits=n_splits, shuffle=True, random_state=cfg.seed)
+			all_splits = [k for k in kf.split(ds)]
+			train_idx, val_idx = all_splits[fold_idx]
+			train_idx, val_idx = train_idx.tolist(), val_idx.tolist()
+
+			train_ds = Subset(ds, train_idx)
+			val_ds = Subset(ds, val_idx)
+			test_ds = val_ds
+		else:
+			raise NotImplementedError(f"kfold is not implemented for {cfg.dataset.type}")
 
 		max_length = collator.max_length
 
